@@ -1,0 +1,5 @@
+Should we train all RBM layers at one iteration, or first train fully first layer, after second and so on?
+
+# Iside second RBM
+1. For updates used not learning rate, but learning rate / batch size
+2. hidden_encode not equal in both RBMs

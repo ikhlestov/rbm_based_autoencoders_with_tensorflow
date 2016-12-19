@@ -1,0 +1,15 @@
+{
+	"build_systems":
+	[
+		{
+			"file_regex": "^[ ]*File \"(...*?)\", line ([0-9]*)",
+			"name": "Anaconda Python Builder",
+			"selector": "source.python",
+			"shell_cmd": "\"/home/legatsap/envs/tensorflow_35/bin/python\" -u \"$file\""
+		}
+	],
+	"settings":
+	{
+		"python_interpreter": "~/envs/tensorflow_35/bin/python"
+	}
+}
