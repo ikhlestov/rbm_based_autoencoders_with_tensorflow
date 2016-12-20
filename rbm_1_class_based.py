@@ -15,41 +15,48 @@ class RBM:
         self.params = params
         self.n_features = data_provider.shapes['inputs']
         self.global_step = 0
+        self.gibbs_sampling_steps = params.get('gibbs_sampling_steps', 1)
 
     def build_model(self):
         self._create_placeholders()
         self._create_variables()
-        self.hidden_probs_0, hidden_states_0 = self._sample_hidden_from_visible(self.inputs)
-        # self.reconstruction = self._sample_visible_from_hidden(self.hidden_probs_0)
 
-        hprob0, hstate0, vprob, hprob1, hstate1 = self._gibbs_sampling_step(
+        hprob0, hstate0, vprob, hprob_last, hstate_last = self._gibbs_sampling_step(
             self.inputs)
+
+        visib_inputs = vprob
+        for _ in range(self.gibbs_sampling_steps - 1):
+            _, _, vprob, hprob_last, hstate_last = self._gibbs_sampling_step(
+                visib_inputs)
+            visib_inputs = vprob
+
         self.reconstruction = vprob
-        self.bin_encoded = hstate1
+        self.bin_encoded = hstate_last
+
+        learning_rate = self.params['learning_rate']
+        batch_size = self.params['batch_size']
 
         # inside original code positive depends on 'bin' or 'gauss'
         # visible units type
         # in case of 'bin' we compare visible with states
         # in case of 'gauss' we compare visible with probabilities
-        positive = self._compute_positive_association(
-            self.inputs, hstate0)
+        # diff on the first iteration betweeen inputs and dreaming
+        positive = tf.matmul(tf.transpose(self.inputs), hstate0)
         # probability
-        negative = tf.matmul(tf.transpose(vprob), hprob1)
-        # negative = tf.matmul(tf.transpose(vprob), hstate1)
-
-        # Update variables
-        learning_rate = self.params['learning_rate']
-        batch_size = self.params['batch_size']
+        # diff on the last iteration between reconstruction and dreaming
+        negative = tf.matmul(tf.transpose(vprob), hprob_last)
 
         self.w_upd8 = self.W.assign_add(
-            learning_rate * (positive - negative) / batch_size)
+            (learning_rate / batch_size) * (positive - negative))
 
+        # diff between first hid.units state and last hid.units state
         self.bias_hidden_upd8 = self.bias_hidden.assign_add(
             tf.mul(learning_rate, tf.reduce_mean(
-                tf.sub(hprob0, hprob1), 0)
+                tf.sub(hprob0, hprob_last), 0)
             )
         )
 
+        # diff between inputs and last reconstruction
         self.bias_visible_upd8 = self.bias_visible.assign_add(
             tf.mul(learning_rate, tf.reduce_mean(
                 tf.sub(self.inputs, vprob), 0)
@@ -74,6 +81,9 @@ class RBM:
             tf.float32,
             [None, self.n_features],
             name='vrand')
+        tf.stop_gradient(self.inputs)
+        tf.stop_gradient(self.hrand)
+        tf.stop_gradient(self.vrand)
 
     def _create_variables(self):
         self.W = tf.Variable(

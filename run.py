@@ -15,6 +15,8 @@ params = {
     'batch_size': 100,
     'validate': True,
     'shuffle': True,
+    # it seems that sampling step 1 works better
+    'gibbs_sampling_steps': 1,
 }
 
 mnist_provider = MNISTDataProvider()
