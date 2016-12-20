@@ -16,18 +16,26 @@ class RBM:
         self.n_features = data_provider.shapes['inputs']
         self.global_step = 0
         self.gibbs_sampling_steps = params.get('gibbs_sampling_steps', 1)
+        self.layers_qtty = params.get('layers_qtty', 1)
 
     def build_model(self):
         self._create_placeholders()
         self._create_variables()
 
+        # shapes:
+        # self.inputs: (?, 784)
+        # hprob0: (?, 100)
+        # hstate0: (?, 100)
+        # vprob: (?, 784)
+        # hprob_last: (?, 100)
+        # hstate_last: (?, 100)
         hprob0, hstate0, vprob, hprob_last, hstate_last = self._gibbs_sampling_step(
-            self.inputs)
+            self.inputs, hid_layer_no=1)
 
         visib_inputs = vprob
         for _ in range(self.gibbs_sampling_steps - 1):
             _, _, vprob, hprob_last, hstate_last = self._gibbs_sampling_step(
-                visib_inputs)
+                visib_inputs, hid_layer_no=1)
             visib_inputs = vprob
 
         self.reconstruction = vprob
@@ -46,18 +54,18 @@ class RBM:
         # diff on the last iteration between reconstruction and dreaming
         negative = tf.matmul(tf.transpose(vprob), hprob_last)
 
-        self.w_upd8 = self.W.assign_add(
+        self.w_0_1_upd = self.W_0_1.assign_add(
             (learning_rate / batch_size) * (positive - negative))
 
         # diff between first hid.units state and last hid.units state
-        self.bias_hidden_upd8 = self.bias_hidden.assign_add(
+        self.bias_1_upd = self.bias_1.assign_add(
             tf.mul(learning_rate, tf.reduce_mean(
                 tf.sub(hprob0, hprob_last), 0)
             )
         )
 
         # diff between inputs and last reconstruction
-        self.bias_visible_upd8 = self.bias_visible.assign_add(
+        self.bias_0_upd = self.bias_0.assign_add(
             tf.mul(learning_rate, tf.reduce_mean(
                 tf.sub(self.inputs, vprob), 0)
             )
@@ -73,60 +81,73 @@ class RBM:
             tf.float32,
             [None, self.n_features],
             name="inputs")
-        self.hrand = tf.placeholder(
-            tf.float32,
-            [None, self.params['num_hidden']],
-            name='hrand')
-        self.vrand = tf.placeholder(
-            tf.float32,
-            [None, self.n_features],
-            name='vrand')
         tf.stop_gradient(self.inputs)
-        tf.stop_gradient(self.hrand)
-        tf.stop_gradient(self.vrand)
 
     def _create_variables(self):
-        self.W = tf.Variable(
-            tf.truncated_normal(
-                shape=[self.n_features, self.params['num_hidden']],
-                stddev=0.1),
-            name='weights')
-        self.bias_hidden = tf.Variable(
-            tf.constant(0.1, shape=[self.params['num_hidden']]),
-            name='hidden-bias')
-        self.bias_visible = tf.Variable(
-            tf.constant(0.1, shape=[self.n_features]),
-            name='visible-bias')
+        # weights for connection between layers 0 and 1
+        layers_sizes = self.params['layers_sizes']
+        for layer_idx in range(self.layers_qtty):
+            layer_no_from = layer_idx
+            layer_no_to = layer_idx + 1
+            w_name = 'W_%d_%d' % (layer_no_from, layer_no_to)
+            weights = tf.Variable(
+                tf.truncated_normal(
+                    shape=[layers_sizes[layer_no_from], layers_sizes[layer_no_to]],
+                    stddev=0.1),
+                name=w_name)
+            setattr(self, w_name, weights)
+
+            bias_name = "bias_%d" % layer_no_to
+            bias = tf.Variable(
+                tf.constant(0.1, shape=[layers_sizes[layer_no_to]]),
+                name=bias_name)
+            setattr(self, bias_name, bias)
+
+        self.bias_0 = tf.Variable(
+            tf.constant(0.1, shape=[layers_sizes[0]]),
+            name='bias_0')
 
     @staticmethod
-    def _sample_prob(probs, rand):
+    def _sample_prob(probs):
+        """Return binary samples 0 or 1"""
+        rand = tf.random_uniform(tf.shape(probs), 0, 1)
         return tf.nn.relu(tf.sign(probs - rand))
 
-    def _sample_hidden_from_visible(self, visible_units):
+    def _sample_hidden_from_visible(self, visible_units, hid_layer_no):
+        vis_layer_no = hid_layer_no - 1
+        weights = getattr(self, 'W_%d_%d' % (vis_layer_no, hid_layer_no))
+        bias = getattr(self, 'bias_%d' % hid_layer_no)
         hid_probs = tf.nn.sigmoid(
             tf.add(
-                tf.matmul(visible_units, self.W),
-                self.bias_hidden
+                tf.matmul(visible_units, weights),
+                bias
             )
         )
-        hid_states = self._sample_prob(hid_probs, self.hrand)
+        hid_states = self._sample_prob(hid_probs)
         return hid_probs, hid_states
 
-    def _sample_visible_from_hidden(self, hidden_units):
+    def _sample_visible_from_hidden(self, hidden_units, vis_layer_no):
+        hid_layer_no = vis_layer_no + 1
+        weights = getattr(self, 'W_%d_%d' % (vis_layer_no, hid_layer_no))
+        bias = getattr(self, 'bias_%d' % vis_layer_no)
         vis_probs = tf.nn.sigmoid(
             tf.add(
-                tf.matmul(hidden_units, tf.transpose(self.W)),
-                self.bias_visible
+                tf.matmul(hidden_units, tf.transpose(weights)),
+                bias
             )
         )
         return vis_probs
 
-    def _gibbs_sampling_step(self, visible):
+    def _gibbs_sampling_step(self, visible, hid_layer_no=1):
         """Perform one step of gibbs sampling.
         """
-        hprobs, hstates = self._sample_hidden_from_visible(visible)
-        vprobs = self._sample_visible_from_hidden(hprobs)
-        hprobs1, hstates1 = self._sample_hidden_from_visible(vprobs)
+        vis_layer_no = hid_layer_no - 1
+        hprobs, hstates = self._sample_hidden_from_visible(
+            visible, hid_layer_no)
+        vprobs = self._sample_visible_from_hidden(
+            hprobs, vis_layer_no)
+        hprobs1, hstates1 = self._sample_hidden_from_visible(
+            vprobs, hid_layer_no)
 
         return hprobs, hstates, vprobs, hprobs1, hstates1
 
@@ -137,29 +158,28 @@ class RBM:
     def _create_feed_dict(self, data):
         return {
             self.inputs: data,
-            self.hrand: np.random.rand(data.shape[0], self.params['num_hidden']),
-            self.vrand: np.random.rand(data.shape[0], self.n_features)
         }
 
     def _epoch_train_step(self):
         params = self.params
         batches = self.data_provider.get_train_set_iter(
             params['batch_size'], params['shuffle'])
-        fetches = [self.w_upd8, self.bias_hidden_upd8,
-                   self.bias_visible_upd8, self.summary]
+        fetches = [self.w_0_1_upd, self.bias_1_upd,
+                   self.bias_0_upd, self.summary]
         valid_batches = self.data_provider.get_validation_set_iter(
             params['batch_size'], params['shuffle'])
-        for batch_no, batch in enumerate(batches):
-            data = batch[0]
-            feed_dict = self._create_feed_dict(data=data)
+        for batch_no, train_batch in enumerate(batches):
+            train_inputs, train_targets = train_batch
+            feed_dict = {self.inputs: train_inputs}
             fetched = self.tf_session.run(fetches, feed_dict=feed_dict)
             summary_str = fetched[-1]
             self.summary_writer.add_summary(summary_str, self.global_step)
             self.global_step += 1
+            # perform validation
             if batch_no % 11 == 0 and self.params['validate']:
                 valid_batch = next(valid_batches)
-                data = valid_batch[0]
-                feed_dict = {self.inputs: data}
+                valid_inputs, valid_targets = valid_batch
+                feed_dict = {self.inputs: valid_inputs}
                 valid_loss = self.tf_session.run(
                     self.cost, feed_dict=feed_dict)
                 valid_loss = float(valid_loss)
@@ -202,7 +222,7 @@ class RBM:
             for batch_no, batch in enumerate(test_batches):
                 feed_dict = {self.inputs: batch[0]}
                 weights, reconstr = self.tf_session.run(
-                    [self.W, self.reconstruction], feed_dict=feed_dict)
+                    [self.W_0_1, self.reconstruction], feed_dict=feed_dict)
                 results[batch_no * batch_size: (batch_no + 1) * batch_size] = reconstr
 
                 if show:
@@ -251,6 +271,7 @@ class RBM:
         main_logs_dir = "/tmp/rbm_logs"
         os.makedirs(main_logs_dir, exist_ok=True)
         run_no = str(len(os.listdir(main_logs_dir)))
+        print("Training model no: %s" % run_no)
         self.logs_dir = os.path.join(main_logs_dir, run_no)
 
         self.get_saves_path(run_no)

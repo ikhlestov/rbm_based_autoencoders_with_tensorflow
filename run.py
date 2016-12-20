@@ -17,6 +17,8 @@ params = {
     'shuffle': True,
     # it seems that sampling step 1 works better
     'gibbs_sampling_steps': 1,
+    'layers_qtty': 1,
+    'layers_sizes': [784, 100],
 }
 
 mnist_provider = MNISTDataProvider()
