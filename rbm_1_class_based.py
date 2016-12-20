@@ -24,60 +24,106 @@ class RBM:
 
         # shapes:
         # self.inputs: (?, 784)
-        # hprob0: (?, 100)
-        # hstate0: (?, 100)
+        # hprob0_0_1: (?, 100)
+        # hstate0_0_1: (?, 100)
         # vprob: (?, 784)
-        # hprob_last: (?, 100)
-        # hstate_last: (?, 100)
-        hprob0, hstate0, vprob, hprob_last, hstate_last = self._gibbs_sampling_step(
-            self.inputs, hid_layer_no=1)
+        # hprob_last_0_1: (?, 100)
+        # hstate_last_0_1: (?, 100)
 
-        visib_inputs = vprob
-        for _ in range(self.gibbs_sampling_steps - 1):
-            _, _, vprob, hprob_last, hstate_last = self._gibbs_sampling_step(
-                visib_inputs, hid_layer_no=1)
-            visib_inputs = vprob
+        visib_inputs_initial_0 = self.inputs
+        visib_inputs_0 = self.inputs
+        for step_no in range(self.gibbs_sampling_steps):
+            gibbs_sample = self._gibbs_sampling_step(
+                visib_inputs_0, hid_layer_no=1)
+            hprob, hstate, vprob_0_1, hprob_last_0_1, hstate_last_0_1 = gibbs_sample
+            if step_no == 0:
+                hprob0_0_1 = hprob
+                hstate0_0_1 = hstate
+            visib_inputs_0 = vprob_0_1
 
-        self.reconstruction = vprob
-        self.bin_encoded = hstate_last
+        # define outputs
+        self.reconstruction = vprob_0_1
 
         learning_rate = self.params['learning_rate']
         batch_size = self.params['batch_size']
+
+        self.updates = []
+        ### define updates for layer
+        # diff between inputs and last reconstruction
+        bias_0_upd = self.bias_0.assign_add(
+            tf.mul(learning_rate, tf.reduce_mean(
+                tf.sub(visib_inputs_initial_0, vprob_0_1), 0)
+            )
+        )
+        self.updates.append(bias_0_upd)
 
         # inside original code positive depends on 'bin' or 'gauss'
         # visible units type
         # in case of 'bin' we compare visible with states
         # in case of 'gauss' we compare visible with probabilities
         # diff on the first iteration betweeen inputs and dreaming
-        positive = tf.matmul(tf.transpose(self.inputs), hstate0)
+        positive_0_1 = tf.matmul(tf.transpose(visib_inputs_initial_0), hstate0_0_1)
         # probability
         # diff on the last iteration between reconstruction and dreaming
-        negative = tf.matmul(tf.transpose(vprob), hprob_last)
-
-        self.updates = []
+        negative_0_1 = tf.matmul(tf.transpose(vprob_0_1), hprob_last_0_1)
         w_0_1_upd = self.W_0_1.assign_add(
-            (learning_rate / batch_size) * (positive - negative))
+            (learning_rate / batch_size) * (positive_0_1 - negative_0_1))
         self.updates.append(w_0_1_upd)
 
         # diff between first hid.units state and last hid.units state
         bias_1_upd = self.bias_1.assign_add(
             tf.mul(learning_rate, tf.reduce_mean(
-                tf.sub(hprob0, hprob_last), 0)
+                tf.sub(hprob0_0_1, hprob_last_0_1), 0)
             )
         )
         self.updates.append(bias_1_upd)
 
-        # diff between inputs and last reconstruction
-        bias_0_upd = self.bias_0.assign_add(
-            tf.mul(learning_rate, tf.reduce_mean(
-                tf.sub(self.inputs, vprob), 0)
-            )
-        )
-        self.updates.append(bias_0_upd)
+        if self.layers_qtty == 2:
+            # visib_inputs_initial_1 = hstate_last_0_1
+            # visib_inputs_1 = hstate_last_0_1
+            visib_inputs_initial_1 = hprob_last_0_1
+            visib_inputs_1 = hprob_last_0_1
+            for step_no in range(self.gibbs_sampling_steps):
+                gibbs_sample = self._gibbs_sampling_step(
+                    visib_inputs_1, hid_layer_no=2)
+                hprob, hstate, vprob_1_2, hprob_last_1_2, hstate_last_1_2 = gibbs_sample
+                if step_no == 0:
+                    hprob0_1_2 = hprob
+                    hstate0_1_2 = hstate
+                visib_inputs_1 = vprob_1_2
 
+            # define outputs
+            self.reconstruction = self._sample_visible_from_hidden(
+                vprob_1_2, vis_layer_no=0)
+            ### define updates for layer
+            # diff between inputs and last reconstruction
+            # bias_1_upd = self.bias_1.assign_add(
+            #     tf.mul(learning_rate, tf.reduce_mean(
+            #         tf.sub(visib_inputs_initial_1, vprob_1_2), 0)
+            #     )
+            # )
+            # self.updates.append(bias_1_upd)
+
+            positive_1_2 = tf.matmul(tf.transpose(visib_inputs_initial_1), hstate0_1_2)
+            # probability
+            # diff on the last iteration between reconstruction and dreaming
+            negative_1_2 = tf.matmul(tf.transpose(vprob_1_2), hprob_last_1_2)
+            w_1_2_upd = self.W_1_2.assign_add(
+                (learning_rate / batch_size) * (positive_1_2 - negative_1_2))
+            self.updates.append(w_1_2_upd)
+
+            bias_2_upd = self.bias_2.assign_add(
+                tf.mul(learning_rate, tf.reduce_mean(
+                    tf.sub(hprob0_1_2, hprob_last_1_2), 0)
+                )
+            )
+            self.updates.append(bias_2_upd)
+
+        # add some summaries
         self.cost = tf.sqrt(tf.reduce_mean(
-            tf.square(tf.sub(self.inputs, vprob))))
+            tf.square(tf.sub(self.inputs, self.reconstruction))))
         tf.scalar_summary("train_loss", self.cost)
+
         self.summary = tf.merge_all_summaries()
 
     def _create_placeholders(self):
@@ -99,17 +145,20 @@ class RBM:
                     shape=[layers_sizes[layer_no_from], layers_sizes[layer_no_to]],
                     stddev=0.1),
                 name=w_name)
+            tf.stop_gradient(weights)
             setattr(self, w_name, weights)
 
             bias_name = "bias_%d" % layer_no_to
             bias = tf.Variable(
                 tf.constant(0.1, shape=[layers_sizes[layer_no_to]]),
                 name=bias_name)
+            tf.stop_gradient(bias)
             setattr(self, bias_name, bias)
 
         self.bias_0 = tf.Variable(
             tf.constant(0.1, shape=[layers_sizes[0]]),
             name='bias_0')
+        tf.stop_gradient(self.bias_0)
 
     @staticmethod
     def _sample_prob(probs):

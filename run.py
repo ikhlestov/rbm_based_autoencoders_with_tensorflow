@@ -11,14 +11,13 @@ args = parser.parse_args()
 params = {
     'epochs': 5,
     'learning_rate': 0.01,
-    'num_hidden': 100,
     'batch_size': 100,
     'validate': True,
     'shuffle': True,
     # it seems that sampling step 1 works better
     'gibbs_sampling_steps': 1,
-    'layers_qtty': 1,
-    'layers_sizes': [784, 100],
+    'layers_qtty': 2,
+    'layers_sizes': [784, 200, 100],  # [n_input_features, layer_1, ...]
 }
 
 mnist_provider = MNISTDataProvider()
