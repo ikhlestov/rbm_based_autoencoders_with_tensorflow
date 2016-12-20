@@ -15,9 +15,14 @@ params = {
     'validate': True,
     'shuffle': True,
     # it seems that sampling step 1 works better
-    'gibbs_sampling_steps': 1,
-    'layers_qtty': 2,
-    'layers_sizes': [784, 200, 100],  # [n_input_features, layer_1, ...]
+    'gibbs_sampling_steps': 3,
+    'layers_qtty': 3,
+    'layers_sizes': [784, 500, 200, 100],  # [n_input_features, layer_1, ...]
+    # 'layers_qtty': 2,
+    # 'layers_sizes': [784, 200, 100],  # [n_input_features, layer_1, ...]
+    # 'layers_qtty': 1,
+    # 'layers_sizes': [784, 100],  # [n_input_features, layer_1, ...]
+
 }
 
 mnist_provider = MNISTDataProvider()

@@ -22,109 +22,86 @@ class RBM:
         self._create_placeholders()
         self._create_variables()
 
-        # shapes:
-        # self.inputs: (?, 784)
-        # hprob0_0_1: (?, 100)
-        # hstate0_0_1: (?, 100)
-        # vprob: (?, 784)
-        # hprob_last_0_1: (?, 100)
-        # hstate_last_0_1: (?, 100)
-
-        visib_inputs_initial_0 = self.inputs
-        visib_inputs_0 = self.inputs
-        for step_no in range(self.gibbs_sampling_steps):
-            gibbs_sample = self._gibbs_sampling_step(
-                visib_inputs_0, hid_layer_no=1)
-            hprob, hstate, vprob_0_1, hprob_last_0_1, hstate_last_0_1 = gibbs_sample
-            if step_no == 0:
-                hprob0_0_1 = hprob
-                hstate0_0_1 = hstate
-            visib_inputs_0 = vprob_0_1
-
-        # define outputs
-        self.reconstruction = vprob_0_1
-
-        learning_rate = self.params['learning_rate']
-        batch_size = self.params['batch_size']
-
         self.updates = []
-        ### define updates for layer
-        # diff between inputs and last reconstruction
-        bias_0_upd = self.bias_0.assign_add(
-            tf.mul(learning_rate, tf.reduce_mean(
-                tf.sub(visib_inputs_initial_0, vprob_0_1), 0)
-            )
-        )
-        self.updates.append(bias_0_upd)
+        inputs = self.inputs
+        for layer_no in range(self.layers_qtty):
+            layer_from = layer_no
+            layer_to = layer_no + 1
+            tmp_res = self.rbm_block(
+                inputs=inputs, layer_from=layer_from, layer_to=layer_to)
+            updates, vprob_last, hprob_last, hstate_last = tmp_res
+            inputs = hprob_last
+            self.updates.extend(updates)
 
-        # inside original code positive depends on 'bin' or 'gauss'
-        # visible units type
-        # in case of 'bin' we compare visible with states
-        # in case of 'gauss' we compare visible with probabilities
-        # diff on the first iteration betweeen inputs and dreaming
-        positive_0_1 = tf.matmul(tf.transpose(visib_inputs_initial_0), hstate0_0_1)
-        # probability
-        # diff on the last iteration between reconstruction and dreaming
-        negative_0_1 = tf.matmul(tf.transpose(vprob_0_1), hprob_last_0_1)
-        w_0_1_upd = self.W_0_1.assign_add(
-            (learning_rate / batch_size) * (positive_0_1 - negative_0_1))
-        self.updates.append(w_0_1_upd)
-
-        # diff between first hid.units state and last hid.units state
-        bias_1_upd = self.bias_1.assign_add(
-            tf.mul(learning_rate, tf.reduce_mean(
-                tf.sub(hprob0_0_1, hprob_last_0_1), 0)
-            )
-        )
-        self.updates.append(bias_1_upd)
-
-        if self.layers_qtty == 2:
-            # visib_inputs_initial_1 = hstate_last_0_1
-            # visib_inputs_1 = hstate_last_0_1
-            visib_inputs_initial_1 = hprob_last_0_1
-            visib_inputs_1 = hprob_last_0_1
-            for step_no in range(self.gibbs_sampling_steps):
-                gibbs_sample = self._gibbs_sampling_step(
-                    visib_inputs_1, hid_layer_no=2)
-                hprob, hstate, vprob_1_2, hprob_last_1_2, hstate_last_1_2 = gibbs_sample
-                if step_no == 0:
-                    hprob0_1_2 = hprob
-                    hstate0_1_2 = hstate
-                visib_inputs_1 = vprob_1_2
-
-            # define outputs
-            self.reconstruction = self._sample_visible_from_hidden(
-                vprob_1_2, vis_layer_no=0)
-            ### define updates for layer
-            # diff between inputs and last reconstruction
-            # bias_1_upd = self.bias_1.assign_add(
-            #     tf.mul(learning_rate, tf.reduce_mean(
-            #         tf.sub(visib_inputs_initial_1, vprob_1_2), 0)
-            #     )
-            # )
-            # self.updates.append(bias_1_upd)
-
-            positive_1_2 = tf.matmul(tf.transpose(visib_inputs_initial_1), hstate0_1_2)
-            # probability
-            # diff on the last iteration between reconstruction and dreaming
-            negative_1_2 = tf.matmul(tf.transpose(vprob_1_2), hprob_last_1_2)
-            w_1_2_upd = self.W_1_2.assign_add(
-                (learning_rate / batch_size) * (positive_1_2 - negative_1_2))
-            self.updates.append(w_1_2_upd)
-
-            bias_2_upd = self.bias_2.assign_add(
-                tf.mul(learning_rate, tf.reduce_mean(
-                    tf.sub(hprob0_1_2, hprob_last_1_2), 0)
-                )
-            )
-            self.updates.append(bias_2_upd)
-
+        last_prob = hprob_last
+        for vis_layer_no in list(reversed(range(self.layers_qtty))):
+            last_prob = self._sample_visible_from_hidden(
+                hidden_units=last_prob, vis_layer_no=vis_layer_no)
+        self.reconstruction = last_prob
         # add some summaries
         self.cost = tf.sqrt(tf.reduce_mean(
             tf.square(tf.sub(self.inputs, self.reconstruction))))
         tf.scalar_summary("train_loss", self.cost)
 
         self.summary = tf.merge_all_summaries()
+
+    def rbm_block(self, inputs, layer_from, layer_to, vis_unit_type='gauss'):
+        # shapes:
+        # self.inputs: (?, 784)
+        # hprob_first: (?, 100)
+        # hstate_first: (?, 100)
+        # vprob_last: (?, 784)
+        # hprob_last: (?, 100)
+        # hstate_last: (?, 100)
+
+        visib_inputs_initial = inputs
+        vprob_last = inputs
+        for step_no in range(self.gibbs_sampling_steps):
+            gibbs_sample = self._gibbs_sampling_step(
+                vprob_last, hid_layer_no=layer_to)
+            hprob, hstate, vprob_last, hprob_last, hstate_last = gibbs_sample
+            if step_no == 0:
+                hprob_first = hprob
+                hstate_first = hstate
+
+        learning_rate = self.params['learning_rate']
+        batch_size = self.params['batch_size']
+
+        updates = []
+        ### define updates for layer
+        # diff between inputs and last reconstruction
+        bias_layer_from = getattr(self, 'bias_%d' % layer_from)
+        bias_layer_from_upd = bias_layer_from.assign_add(
+            tf.mul(learning_rate, tf.reduce_mean(
+                tf.sub(visib_inputs_initial, vprob_last), 0)
+            )
+        )
+        updates.append(bias_layer_from_upd)
+
+        # diff between first hid.units state and last hid.units state
+        bias_layer_to = getattr(self, 'bias_%d' % layer_to)
+        bias_layer_to_upd = bias_layer_to.assign_add(
+            tf.mul(learning_rate, tf.reduce_mean(
+                tf.sub(hprob_first, hprob_last), 0)
+            )
+        )
+        updates.append(bias_layer_to_upd)
+
+        # inside original code positive depends on 'bin' or 'gauss'
+        # visible units type
+        # in case of 'bin' we compare visible with states
+        # in case of 'gauss' we compare visible with probabilities
+        # diff on the first iteration betweeen inputs and dreaming
+        positive = tf.matmul(tf.transpose(visib_inputs_initial), hprob_first)
+        # probability
+        # diff on the last iteration between reconstruction and dreaming
+        negative = tf.matmul(tf.transpose(vprob_last), hprob_last)
+        weights_from_to = getattr(self, "W_%d_%d" % (layer_from, layer_to))
+        weights_from_to_upd = weights_from_to.assign_add(
+            (learning_rate / batch_size) * (positive - negative))
+        updates.append(weights_from_to_upd)
+
+        return updates, vprob_last, hprob_last, hstate_last
 
     def _create_placeholders(self):
         self.inputs = tf.placeholder(
