@@ -44,18 +44,18 @@ bias_visible = tf.Variable(tf.random_uniform([size_vis, 1], -0.005, 0.005))
 
 # define graph/algorithm
 
-hidden_encode = sample(
+hidden_state_0 = sample(
     tf.sigmoid(tf.matmul(tf.transpose(W), inputs) + bias_hidden))
 
 
 # CD-k
 # we use tf.while_loop to achieve the multiple (k - 1) gibbs sampling
 def rbmGibbs(xx, hh, count, k):
-    xk = sampleInt(
+    hid_state = sampleInt(
         tf.sigmoid(tf.matmul(W, hh) + bias_visible))
-    hk = sampleInt(
-        tf.sigmoid(tf.matmul(tf.transpose(W), xk) + bias_hidden))
-    return xk, hk, count + 1, k
+    reconstruction = sampleInt(
+        tf.sigmoid(tf.matmul(tf.transpose(W), hid_state) + bias_hidden))
+    return reconstruction, hid_state, count + 1, k
 
 
 def lessThanK(xk, hk, count, k):
@@ -64,25 +64,24 @@ def lessThanK(xk, hk, count, k):
 
 gibbs_counter = tf.constant(1)
 
-[xk1, hk1, _, _] = control_flow_ops.While(
-    lessThanK, rbmGibbs, [inputs, hidden_encode, gibbs_counter, k], 1, False)
+[reconstructed, hid_state, _, _] = control_flow_ops.While(
+    lessThanK, rbmGibbs, [inputs, hidden_state_0, gibbs_counter, k], 1, False)
 
 # update rule
+positive_weights_update = tf.matmul(inputs, tf.transpose(hidden_state_0))
+negative_weights_update = tf.matmul(reconstructed, tf.transpose(hid_state))
 w_upd = tf.mul(
     lr / batch_size,
-    tf.sub(
-        tf.matmul(inputs, tf.transpose(hidden_encode)),
-        tf.matmul(xk1, tf.transpose(hk1))
-    )
+    tf.sub(positive_weights_update, negative_weights_update)
 )
 bias_hidden_upd = tf.mul(
     lr / batch_size,
     tf.reduce_sum(
-        tf.sub(hidden_encode, hk1), 1, True)
+        tf.sub(hidden_state_0, hid_state), 1, True)
 )
 bias_visible_upd = tf.mul(
     lr / batch_size,
-    tf.reduce_sum(tf.sub(inputs, xk1), 1, True)
+    tf.reduce_sum(tf.sub(inputs, reconstructed), 1, True)
 )
 
 updates = [
@@ -92,9 +91,9 @@ updates = [
 ]
 
 # stop gradient to save time and mem
-tf.stop_gradient(hidden_encode)
-tf.stop_gradient(xk1)
-tf.stop_gradient(hk1)
+tf.stop_gradient(hidden_state_0)
+tf.stop_gradient(reconstructed)
+tf.stop_gradient(hid_state)
 tf.stop_gradient(w_upd)
 tf.stop_gradient(bias_hidden_upd)
 tf.stop_gradient(bias_visible_upd)

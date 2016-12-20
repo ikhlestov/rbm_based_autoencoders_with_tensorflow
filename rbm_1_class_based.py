@@ -19,16 +19,23 @@ class RBM:
     def build_model(self):
         self._create_placeholders()
         self._create_variables()
-        self.hidden_encode = self._sample_hidden_from_visible(self.inputs)[0]
-        self.reconstruction = self._sample_visible_from_hidden(
-            self.hidden_encode)
+        self.hidden_probs_0, hidden_states_0 = self._sample_hidden_from_visible(self.inputs)
+        # self.reconstruction = self._sample_visible_from_hidden(self.hidden_probs_0)
 
         hprob0, hstate0, vprob, hprob1, hstate1 = self._gibbs_sampling_step(
             self.inputs)
+        self.reconstruction = vprob
+        self.bin_encoded = hstate1
 
+        # inside original code positive depends on 'bin' or 'gauss'
+        # visible units type
+        # in case of 'bin' we compare visible with states
+        # in case of 'gauss' we compare visible with probabilities
         positive = self._compute_positive_association(
             self.inputs, hstate0)
+        # probability
         negative = tf.matmul(tf.transpose(vprob), hprob1)
+        # negative = tf.matmul(tf.transpose(vprob), hstate1)
 
         # Update variables
         learning_rate = self.params['learning_rate']
@@ -189,7 +196,6 @@ class RBM:
                 results[batch_no * batch_size: (batch_no + 1) * batch_size] = reconstr
 
                 if show:
-                    import ipdb; ipdb.set_trace()
                     images_stack = []
                     tiled_initial_images = tile_raster_images(
                         batch[0],
