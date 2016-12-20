@@ -54,22 +54,26 @@ class RBM:
         # diff on the last iteration between reconstruction and dreaming
         negative = tf.matmul(tf.transpose(vprob), hprob_last)
 
-        self.w_0_1_upd = self.W_0_1.assign_add(
+        self.updates = []
+        w_0_1_upd = self.W_0_1.assign_add(
             (learning_rate / batch_size) * (positive - negative))
+        self.updates.append(w_0_1_upd)
 
         # diff between first hid.units state and last hid.units state
-        self.bias_1_upd = self.bias_1.assign_add(
+        bias_1_upd = self.bias_1.assign_add(
             tf.mul(learning_rate, tf.reduce_mean(
                 tf.sub(hprob0, hprob_last), 0)
             )
         )
+        self.updates.append(bias_1_upd)
 
         # diff between inputs and last reconstruction
-        self.bias_0_upd = self.bias_0.assign_add(
+        bias_0_upd = self.bias_0.assign_add(
             tf.mul(learning_rate, tf.reduce_mean(
                 tf.sub(self.inputs, vprob), 0)
             )
         )
+        self.updates.append(bias_0_upd)
 
         self.cost = tf.sqrt(tf.reduce_mean(
             tf.square(tf.sub(self.inputs, vprob))))
@@ -164,8 +168,7 @@ class RBM:
         params = self.params
         batches = self.data_provider.get_train_set_iter(
             params['batch_size'], params['shuffle'])
-        fetches = [self.w_0_1_upd, self.bias_1_upd,
-                   self.bias_0_upd, self.summary]
+        fetches = [self.updates, self.summary]
         valid_batches = self.data_provider.get_validation_set_iter(
             params['batch_size'], params['shuffle'])
         for batch_no, train_batch in enumerate(batches):
