@@ -25,16 +25,23 @@ class RBM:
         self._create_placeholders()
         self._create_variables()
 
-        self.updates = []
+        # pass input through previous layers to construct right input
         inputs = self.inputs
-        for layer_no in range(self.layers_qtty):
-            layer_from = layer_no
-            layer_to = layer_no + 1
-            tmp_res = self.rbm_block(
-                inputs=inputs, layer_from=layer_from, layer_to=layer_to)
-            updates, vprob_last, hprob_last, hstate_last = tmp_res
-            inputs = hprob_last
-            self.updates.extend(updates)
+        for layer_no in range(self.layers_qtty - 1):
+            hid_layer_no = layer_no + 1
+            hid_probs, hid_states = self._sample_hidden_from_visible(
+                inputs, hid_layer_no)
+            inputs = hid_probs
+
+        # now enable RBM for last two layers
+        self.updates = []
+        layer_from = self.layers_qtty - 1
+        layer_to = self.layers_qtty
+        tmp_res = self.rbm_block(
+            inputs=inputs, layer_from=layer_from, layer_to=layer_to)
+        updates, vprob_last, hprob_last, hstate_last = tmp_res
+        inputs = hprob_last
+        self.updates.extend(updates)
 
         last_prob = hprob_last
         for vis_layer_no in list(reversed(range(self.layers_qtty))):
@@ -226,19 +233,52 @@ class RBM:
     def _epoch_validate_step(self):
         pass
 
+    def _get_restored_variables_names(self):
+        restore_dict = {}
+        for layer_no in range(self.params['layers_qtty']):
+            bias_name = "bias_%d" % layer_no
+            restore_dict[bias_name] = getattr(self, bias_name)
+            if layer_no > 0:
+                w_name = "W_%d_%d" % (layer_no - 1, layer_no)
+                restore_dict[w_name] = getattr(self, w_name)
+        return restore_dict
+
+    def _get_new_variables_names(self):
+        last_layer = self.params['layers_qtty']
+        w_name = "W_%d_%d" % (last_layer - 1, last_layer)
+        w = getattr(self, w_name)
+        bias_name = "bias_%d" % last_layer
+        bias = getattr(self, bias_name)
+        new_vars = [w, bias]
+        return new_vars
+
     def train(self):
         if not self.model_was_builded:
             self.build_model()
             self.model_was_builded = True
         prev_run_no = self.params.get('run_no', None)
         self.define_runner_folders()
-        self.saver = tf.train.Saver()
+        # saver to save all params
+        saver = tf.train.Saver()
+        # restorer to restore only previous variables
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
-        with tf.Session(config=config) as self.tf_session:
+        with tf.Session(config=config) as sess:
+            self.tf_session = sess
             if prev_run_no:
-                self.saver.restore(self.tf_session, self.saves_path)
+                print("Restore variables from previous run:")
+                restore_vars_dict = self._get_restored_variables_names()
+                for var_name in restore_vars_dict.keys():
+                    print("\t%s" % var_name)
+                restorer = tf.train.Saver(restore_vars_dict)
+                restorer.restore(self.tf_session, self.saves_path)
+                print("Initialize not restored variables:")
+                new_variables = self._get_new_variables_names()
+                for var in new_variables:
+                    print("\t%s" % var.name)
+                sess.run(tf.initialize_variables(new_variables))
             else:
+                print("Initialize new variables")
                 tf.initialize_all_variables().run()
             self.summary_writer = tf.train.SummaryWriter(
                 self.logs_dir, self.tf_session.graph)
@@ -248,7 +288,7 @@ class RBM:
                 time_cons = time.time() - start
                 time_cons = str(datetime.timedelta(seconds=time_cons))
                 print("Epoch: %d, time consumption: %s" % (epoch, time_cons))
-            self.saver.save(self.tf_session, self.saves_path)
+            saver.save(self.tf_session, self.saves_path)
         return self.params
 
     def test(self, run_no):
