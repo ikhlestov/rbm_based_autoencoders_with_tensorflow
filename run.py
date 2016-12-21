@@ -9,19 +9,19 @@ parser.add_argument('--run_no', type=str)
 args = parser.parse_args()
 
 params = {
-    'epochs': 5,
+    'epochs': 2,
     'learning_rate': 0.01,
     'batch_size': 100,
     'validate': True,
     'shuffle': True,
     # it seems that sampling step 1 works better
     'gibbs_sampling_steps': 3,
-    'layers_qtty': 3,
-    'layers_sizes': [784, 500, 200, 100],  # [n_input_features, layer_1, ...]
+    # 'layers_qtty': 3,
+    # 'layers_sizes': [784, 500, 200, 100],  # [n_input_features, layer_1, ...]
     # 'layers_qtty': 2,
     # 'layers_sizes': [784, 200, 100],  # [n_input_features, layer_1, ...]
-    # 'layers_qtty': 1,
-    # 'layers_sizes': [784, 100],  # [n_input_features, layer_1, ...]
+    'layers_qtty': 1,
+    'layers_sizes': [784, 100],  # [n_input_features, layer_1, ...]
 
 }
 
@@ -30,6 +30,7 @@ rmb_model = RBM(
     data_provider=mnist_provider,
     params=params)
 if not args.test:
+    rmb_model.train()
     rmb_model.train()
 else:
     if not args.run_no:

@@ -12,11 +12,14 @@ from utils import tile_raster_images
 class RBM:
     def __init__(self, data_provider, params):
         self.data_provider = data_provider
+        params['global_step'] = params.get('global_step', 0)
         self.params = params
         self.n_features = data_provider.shapes['inputs']
-        self.global_step = 0
         self.gibbs_sampling_steps = params.get('gibbs_sampling_steps', 1)
         self.layers_qtty = params.get('layers_qtty', 1)
+        self.main_save_dir = "/tmp/rbm_saves"
+        self.main_logs_dir = "/tmp/rbm_logs"
+        self.model_was_builded = False
 
     def build_model(self):
         self._create_placeholders()
@@ -202,8 +205,9 @@ class RBM:
             feed_dict = {self.inputs: train_inputs}
             fetched = self.tf_session.run(fetches, feed_dict=feed_dict)
             summary_str = fetched[-1]
-            self.summary_writer.add_summary(summary_str, self.global_step)
-            self.global_step += 1
+            self.summary_writer.add_summary(
+                summary_str, self.params['global_step'])
+            self.params['global_step'] += 1
             # perform validation
             if batch_no % 11 == 0 and self.params['validate']:
                 valid_batch = next(valid_batches)
@@ -216,17 +220,26 @@ class RBM:
                     tf.Summary.Value(
                         tag="valid_loss", simple_value=valid_loss)]
                 )
-                self.summary_writer.add_summary(summary_str, self.global_step)
+                self.summary_writer.add_summary(
+                    summary_str, self.params['global_step'])
 
     def _epoch_validate_step(self):
         pass
 
     def train(self):
-        self.build_model()
+        if not self.model_was_builded:
+            self.build_model()
+            self.model_was_builded = True
+        prev_run_no = self.params.get('run_no', None)
         self.define_runner_folders()
         self.saver = tf.train.Saver()
-        with tf.Session() as self.tf_session:
-            tf.initialize_all_variables().run()
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        with tf.Session(config=config) as self.tf_session:
+            if prev_run_no:
+                self.saver.restore(self.tf_session, self.saves_path)
+            else:
+                tf.initialize_all_variables().run()
             self.summary_writer = tf.train.SummaryWriter(
                 self.logs_dir, self.tf_session.graph)
             for epoch in range(self.params['epochs']):
@@ -236,6 +249,7 @@ class RBM:
                 time_cons = str(datetime.timedelta(seconds=time_cons))
                 print("Epoch: %d, time consumption: %s" % (epoch, time_cons))
             self.saver.save(self.tf_session, self.saves_path)
+        return self.params
 
     def test(self, run_no):
         self.build_model()
@@ -288,19 +302,17 @@ class RBM:
 
             np.save('/tmp/reconstr', results)
 
-
-
     def get_saves_path(self, run_no):
-        main_save_dir = "/tmp/rbm_saves"
-        saves_dir = os.path.join(main_save_dir, run_no)
+        saves_dir = os.path.join(self.main_save_dir, run_no)
         os.makedirs(saves_dir, exist_ok=True)
-        self.saves_path = os.path.join(main_save_dir, "model.ckpt")
+        self.saves_path = os.path.join(saves_dir, "model.ckpt")
 
     def define_runner_folders(self):
-        main_logs_dir = "/tmp/rbm_logs"
-        os.makedirs(main_logs_dir, exist_ok=True)
-        run_no = str(len(os.listdir(main_logs_dir)))
+        run_no = self.params.get('run_no', None)
+        os.makedirs(self.main_logs_dir, exist_ok=True)
+        if run_no is None:
+            run_no = str(len(os.listdir(self.main_logs_dir)))
+            self.params['run_no'] = run_no
         print("Training model no: %s" % run_no)
-        self.logs_dir = os.path.join(main_logs_dir, run_no)
-
+        self.logs_dir = os.path.join(self.main_logs_dir, run_no)
         self.get_saves_path(run_no)
