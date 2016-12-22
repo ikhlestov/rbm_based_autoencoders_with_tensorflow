@@ -20,6 +20,7 @@ class RBM:
         self.main_save_dir = "/tmp/rbm_saves"
         self.main_logs_dir = "/tmp/rbm_logs"
         self.model_was_builded = False
+        self.bin_type = True
 
     def build_model(self):
         self._create_placeholders()
@@ -33,14 +34,20 @@ class RBM:
             tmp_res = self.rbm_block(
                 inputs=inputs, layer_from=layer_from, layer_to=layer_to)
             updates, vprob_last, hprob_last, hstate_last = tmp_res
-            inputs = hprob_last
+            if self.bin_type:
+                inputs = hstate_last
+            else:
+                inputs = hprob_last
             self.updates.extend(updates)
 
-        last_prob = hprob_last
+        if self.bin_type:
+            last_out = hstate_last
+        else:
+            last_out = hprob_last
         for vis_layer_no in list(reversed(range(self.layers_qtty))):
-            last_prob = self._sample_visible_from_hidden(
-                hidden_units=last_prob, vis_layer_no=vis_layer_no)
-        self.reconstruction = last_prob
+            last_out = self._sample_visible_from_hidden(
+                hidden_units=last_out, vis_layer_no=vis_layer_no)
+        self.reconstruction = last_out
         # add some summaries
         self.cost = tf.sqrt(tf.reduce_mean(
             tf.square(tf.sub(self.inputs, self.reconstruction))))
@@ -83,9 +90,13 @@ class RBM:
 
         # diff between first hid.units state and last hid.units state
         bias_layer_to = getattr(self, 'bias_%d' % layer_to)
+        if self.bin_type:
+            bias_layer_to_sub = tf.sub(hstate_first, hstate_last)
+        else:
+            bias_layer_to_sub = tf.sub(hprob_first, hprob_last)
         bias_layer_to_upd = bias_layer_to.assign_add(
             tf.mul(learning_rate, tf.reduce_mean(
-                tf.sub(hprob_first, hprob_last), 0)
+                bias_layer_to_sub, 0)
             )
         )
         updates.append(bias_layer_to_upd)
@@ -95,10 +106,15 @@ class RBM:
         # in case of 'bin' we compare visible with states
         # in case of 'gauss' we compare visible with probabilities
         # diff on the first iteration betweeen inputs and dreaming
-        positive = tf.matmul(tf.transpose(visib_inputs_initial), hprob_first)
-        # probability
-        # diff on the last iteration between reconstruction and dreaming
-        negative = tf.matmul(tf.transpose(vprob_last), hprob_last)
+        if self.bin_type:
+            positive = tf.matmul(
+                tf.transpose(visib_inputs_initial), hstate_first)
+            negative = tf.matmul(tf.transpose(vprob_last), hstate_last)
+        else:
+            positive = tf.matmul(
+                tf.transpose(visib_inputs_initial), hprob_first)
+            negative = tf.matmul(tf.transpose(vprob_last), hprob_last)
+
         weights_from_to = getattr(self, "W_%d_%d" % (layer_from, layer_to))
         weights_from_to_upd = weights_from_to.assign_add(
             (learning_rate / batch_size) * (positive - negative))
@@ -179,6 +195,8 @@ class RBM:
             visible, hid_layer_no)
         vprobs = self._sample_visible_from_hidden(
             hprobs, vis_layer_no)
+        if self.bin_type and hid_layer_no > 1:
+            vprobs = self._sample_prob(vprobs)
         hprobs1, hstates1 = self._sample_hidden_from_visible(
             vprobs, hid_layer_no)
 
