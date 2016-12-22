@@ -3,7 +3,7 @@ import argparse
 import tensorflow as tf
 
 from rbm_1_class_based import RBM
-from rbm_3_dynamic_restored import RBM as RBM_dynamic
+from rbm_3_dynamic_restored import RBMDynamic
 from data_providers import MNISTDataProvider
 
 parser = argparse.ArgumentParser()
@@ -42,7 +42,7 @@ if not args.test:
             print("Train layers pair %d and %d" % (layers_qtty - 1, layers_qtty))
             params['layers_qtty'] = layers_qtty
             params['layers_sizes'] = initial_params['layers_sizes'][:layers_qtty + 1]
-            rmb_model = RBM_dynamic(
+            rmb_model = RBMDynamic(
                 data_provider=mnist_provider,
                 params=params)
             params = rmb_model.train()
@@ -59,7 +59,7 @@ else:
         print("\nYou should provide run_no of model to test!\n")
         exit()
     if args.dynamic:
-        rmb_model = RBM_dynamic(
+        rmb_model = RBMDynamic(
             data_provider=mnist_provider,
             params=params)
     else:
