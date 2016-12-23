@@ -39,3 +39,7 @@ negative = tf.matmul(tf.transpose(last_reconstr), hidden_state_last)
 
 
 Should we for negative part use reconstructed probabilities or 0/1 states?????? The same for hidden part...
+
+
+TODO:
+1. We should be able to get binary code from every layer.

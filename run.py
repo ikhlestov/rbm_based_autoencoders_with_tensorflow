@@ -21,13 +21,21 @@ params = {
     # it seems that sampling step 1 works better
     'gibbs_sampling_steps': 1,
     'layers_qtty': 3,
-    'layers_sizes': [784, 500, 200, 100],  # [n_input_features, layer_1, ...]
+    'layers_sizes': [784, 484, 196, 100],  # [n_input_features, layer_1, ...]
+    # 'layers_sizes': [784, 784, 784, 100],  # [n_input_features, layer_1, ...]
     # 'layers_qtty': 2,
     # 'layers_sizes': [784, 200, 100],  # [n_input_features, layer_1, ...]
     # 'layers_qtty': 1,
     # 'layers_sizes': [784, 100],  # [n_input_features, layer_1, ...]
-
+    'bin_type': True,
 }
+
+if args.dynamic:
+    notes = 'dynamic__'
+else:
+    notes = 'static__'
+notes += 'bin_type=%s' % params['bin_type']
+params['notes'] = notes
 
 mnist_provider = MNISTDataProvider()
 if args.dynamic:

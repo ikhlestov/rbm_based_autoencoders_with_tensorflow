@@ -34,6 +34,8 @@ class RBMDynamic(RBM):
         updates, vprob_last, hprob_last, hstate_last = tmp_res
         self.updates.extend(updates)
 
+        self.encoded_array = hstate_last
+
         if self.bin_type:
             last_out = hstate_last
         else:

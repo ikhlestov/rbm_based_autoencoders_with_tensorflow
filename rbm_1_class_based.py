@@ -5,8 +5,9 @@ import datetime
 import tensorflow as tf
 import numpy as np
 from PIL import Image
+from scipy.misc import toimage
 
-from utils import tile_raster_images
+from utils import tile_raster_images, scale_to_unit_interval
 
 
 class RBM:
@@ -20,7 +21,7 @@ class RBM:
         self.main_save_dir = "/tmp/rbm_saves"
         self.main_logs_dir = "/tmp/rbm_logs"
         self.model_was_builded = False
-        self.bin_type = True
+        self.bin_type = params.get('bin_type', True)
 
     def build_model(self):
         self._create_placeholders()
@@ -39,6 +40,8 @@ class RBM:
             else:
                 inputs = hprob_last
             self.updates.extend(updates)
+
+        self.encoded_array = hstate_last
 
         if self.bin_type:
             last_out = hstate_last
@@ -81,6 +84,7 @@ class RBM:
         ### define updates for layer
         # diff between inputs and last reconstruction
         bias_layer_from = getattr(self, 'bias_%d' % layer_from)
+        print("Bias layer from: ", bias_layer_from.name)
         bias_layer_from_upd = bias_layer_from.assign_add(
             tf.mul(learning_rate, tf.reduce_mean(
                 tf.sub(visib_inputs_initial, vprob_last), 0)
@@ -90,6 +94,7 @@ class RBM:
 
         # diff between first hid.units state and last hid.units state
         bias_layer_to = getattr(self, 'bias_%d' % layer_to)
+        print("Bias layer to: ", bias_layer_to.name)
         if self.bin_type:
             bias_layer_to_sub = tf.sub(hstate_first, hstate_last)
         else:
@@ -116,6 +121,7 @@ class RBM:
             negative = tf.matmul(tf.transpose(vprob_last), hprob_last)
 
         weights_from_to = getattr(self, "W_%d_%d" % (layer_from, layer_to))
+        print("Weights_from_to: ", weights_from_to.name)
         weights_from_to_upd = weights_from_to.assign_add(
             (learning_rate / batch_size) * (positive - negative))
         updates.append(weights_from_to_upd)
@@ -274,43 +280,67 @@ class RBM:
         self.saver = tf.train.Saver()
         self.get_saves_path(run_no)
         show = True
+        pickles_folder = '/tmp/rbm_reconstr'
+        os.makedirs(pickles_folder, exist_ok=True)
         with tf.Session() as self.tf_session:
             self.saver.restore(self.tf_session, self.saves_path)
             batch_size = self.params['batch_size']
             test_batches = self.data_provider.get_test_set_iter(
                 batch_size, shuffle=False)
-            results = np.zeros((10000, 784))
+            total_examples = 10000
+            reconstructs = np.zeros((total_examples, 784))
+            encodings = [
+                np.zeros((total_examples, 100)),
+                np.zeros((total_examples, 10))
+            ]
             for batch_no, batch in enumerate(test_batches):
                 feed_dict = {self.inputs: batch[0]}
-                weights, reconstr = self.tf_session.run(
-                    [self.W_0_1, self.reconstruction], feed_dict=feed_dict)
-                results[batch_no * batch_size: (batch_no + 1) * batch_size] = reconstr
+                fetches = []
+                for layer_no in range(self.params['layers_qtty']):
+                    fetches.append(
+                        getattr(self, "W_%d_%d" % (layer_no, layer_no + 1)))
+                fetches.append(self.encoded_array)
+                fetches.append(self.reconstruction)
+                fetched = self.tf_session.run(
+                    fetches, feed_dict=feed_dict)
+                reconstr = fetched[-1]
+                encoded = fetched[-2]
+                weights = fetched[:-2]
+
+                slice_start = batch_no * batch_size
+                slice_end = (batch_no + 1) * batch_size
+                encodings[0][slice_start: slice_end] = encoded
+                encodings[1][slice_start: slice_end] = batch[1]
+                reconstructs[slice_start: slice_end] = reconstr
 
                 if show:
+                    tile_h_w = 10
                     images_stack = []
                     tiled_initial_images = tile_raster_images(
                         batch[0],
                         img_shape=(28, 28),
-                        tile_shape=(10, 10),
+                        tile_shape=(tile_h_w, tile_h_w),
                         tile_spacing=(2, 2)
                     )
                     images_stack.append(tiled_initial_images)
 
-                    side_h = 10
-                    curr_W = weights
-                    # import ipdb; ipdb.set_trace()
-                    tiled_weights_image = Image.fromarray(tile_raster_images(
-                        curr_W.T,
-                        img_shape=(28, 28),
-                        tile_shape=(side_h, side_h),
-                        tile_spacing=(2, 2))
-                    )
-                    images_stack.append(np.array(tiled_weights_image))
+                    for weight in weights:
+                        print("weight shape: ", weight.shape)
+                        img_shape = int(np.sqrt(weight.shape[0]))
+                        tiled_weights_image = Image.fromarray(tile_raster_images(
+                            weight.T,
+                            img_shape=(img_shape, img_shape),
+                            tile_shape=(tile_h_w, tile_h_w),
+                            tile_spacing=(2, 2))
+                        )
+                        # images_stack.append(np.array(tiled_weights_image))
+                        tiled_weights_image.show()
+                        toimage(weight.T).show()
 
                     tiled_reconst_image = Image.fromarray(tile_raster_images(
                         reconstr,
                         img_shape=(28, 28),
-                        tile_shape=(10, 10),
+                        tile_shape=(tile_h_w, tile_h_w),
                         tile_spacing=(2, 2)))
                     images_stack.append(np.array(tiled_reconst_image))
 
@@ -318,7 +348,17 @@ class RBM:
                     Image.fromarray(stacked_images).show()
                     show = False
 
-            np.save('/tmp/reconstr', results)
+            reconstr_file = os.path.join(
+                pickles_folder, '%s_reconstr' % run_no)
+            np.save(reconstr_file, reconstructs)
+
+            encoded_file = os.path.join(
+                pickles_folder, '%s_encodings' % run_no)
+            np.save(encoded_file, encodings[0])
+
+            labels_file = os.path.join(
+                pickles_folder, '%s_labels' % run_no)
+            np.save(labels_file, encodings[1])
 
     def get_saves_path(self, run_no):
         saves_dir = os.path.join(self.main_save_dir, run_no)
@@ -333,4 +373,7 @@ class RBM:
             self.params['run_no'] = run_no
         print("Training model no: %s" % run_no)
         self.logs_dir = os.path.join(self.main_logs_dir, run_no)
+        notes = self.params.get('notes', False)
+        if notes:
+            self.logs_dir = self.logs_dir + '_' + notes
         self.get_saves_path(run_no)
