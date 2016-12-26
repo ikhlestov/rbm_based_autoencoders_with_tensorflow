@@ -73,3 +73,5 @@ for label, z in zip(numbers, range(10)):
 
     cs = [colors[label]] * 100
     ax.bar(xs, ys, zs=zs, zdir='y', alpha=.7, color=cs)
+
+# use histogram to get distribution
