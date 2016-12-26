@@ -20,7 +20,7 @@ class RBM:
         self.layers_qtty = params.get('layers_qtty', 1)
         self.main_save_dir = "/tmp/rbm_saves"
         self.main_logs_dir = "/tmp/rbm_logs"
-        self.model_was_builded = False
+        self.model_was_built = False
         self.bin_type = params.get('bin_type', True)
 
     def build_model(self):
@@ -251,9 +251,9 @@ class RBM:
         pass
 
     def train(self):
-        if not self.model_was_builded:
+        if not self.model_was_built:
             self.build_model()
-            self.model_was_builded = True
+            self.model_was_built = True
         prev_run_no = self.params.get('run_no', None)
         self.define_runner_folders()
         self.saver = tf.train.Saver()
