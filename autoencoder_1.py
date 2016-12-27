@@ -13,7 +13,7 @@ from utils import tile_raster_images, scale_to_unit_interval
 
 
 class Encoder:
-    def __init__(self, data_provider, params, run_no):
+    def __init__(self, data_provider, params, rbm_run_no=None):
         self.data_provider = data_provider
         params['global_step'] = params.get('global_step', 0)
         self.params = dict(params)
@@ -26,7 +26,7 @@ class Encoder:
         self.model_was_built = False
         self.bin_type = params.get('bin_type', True)
         self.bin_code_width = params['layers_sizes'][-1]
-        self.rbm_run_no = run_no
+        self.rbm_run_no = rbm_run_no
 
     def build_model(self):
         self._create_placeholders()
@@ -64,7 +64,6 @@ class Encoder:
             bias = self._get_bias_tensor(layer_to)
             result = tf.matmul(result, weights, transpose_b=True) + bias
             if layer_to != (self.layers_qtty * 2):
-                print("Apply sigmoid for layer_to output: %d" % layer_to)
                 result = tf.sigmoid(result)
 
         self.reconstr = result
@@ -285,20 +284,25 @@ class Encoder:
             saver.save(self.tf_session, self.saves_path)
         return self.params
 
-    def test(self, run_no):
+    def test(self, run_no, train_set=False, plot_images=False):
         self.build_model()
         self.saver = tf.train.Saver()
         self.get_saves_path(run_no)
-        show = True
+        show = plot_images
         pickles_folder = '/tmp/rbm_aec_reconstr'
         os.makedirs(pickles_folder, exist_ok=True)
         with tf.Session() as self.tf_session:
             tflearn.is_training(False)
             self.saver.restore(self.tf_session, self.saves_path)
             batch_size = self.params['batch_size']
-            test_batches = self.data_provider.get_test_set_iter(
-                batch_size, shuffle=False, noise=True)
-            total_examples = 10000
+            if not train_set:
+                test_batches = self.data_provider.get_test_set_iter(
+                    batch_size, shuffle=False, noise=True)
+                total_examples = 10000
+            else:
+                test_batches = self.data_provider.get_train_set_iter(
+                    batch_size, shuffle=False, noise=True)
+                total_examples = 55000
             reconstructs = np.zeros((total_examples, 784))
             encodings = [
                 np.zeros((total_examples, 100)),
@@ -337,18 +341,18 @@ class Encoder:
                     )
                     images_stack.append(tiled_initial_images)
 
-                    # for weight in weights:
-                    #     print("weight shape: ", weight.shape)
-                    #     img_shape = int(np.sqrt(weight.shape[0]))
-                    #     tiled_weights_image = Image.fromarray(tile_raster_images(
-                    #         weight.T,
-                    #         img_shape=(img_shape, img_shape),
-                    #         tile_shape=(tile_h_w, tile_h_w),
-                    #         tile_spacing=(2, 2))
-                    #     )
-                    #     # images_stack.append(np.array(tiled_weights_image))
-                    #     tiled_weights_image.show()
-                    #     toimage(weight.T).show()
+                    for weight in weights:
+                        print("weight shape: ", weight.shape)
+                        img_shape = int(np.sqrt(weight.shape[0]))
+                        tiled_weights_image = Image.fromarray(tile_raster_images(
+                            weight.T,
+                            img_shape=(img_shape, img_shape),
+                            tile_shape=(tile_h_w, tile_h_w),
+                            tile_spacing=(2, 2))
+                        )
+                        # images_stack.append(np.array(tiled_weights_image))
+                        tiled_weights_image.show()
+                        toimage(weight.T).show()
 
                     tiled_reconst_image = Image.fromarray(tile_raster_images(
                         reconstr,
@@ -361,16 +365,27 @@ class Encoder:
                     Image.fromarray(stacked_images).show()
                     show = False
 
+            def handle_filename(f_name, train_set):
+                """Depends on train or test set change filename"""
+                if train_set:
+                    f_name += '_train_set'
+                else:
+                    f_name += '_test_set'
+                return f_name
+
             reconstr_file = os.path.join(
                 pickles_folder, '%s_reconstr' % run_no)
+            reconstr_file = handle_filename(reconstr_file, train_set)
             np.save(reconstr_file, reconstructs)
 
             encoded_file = os.path.join(
                 pickles_folder, '%s_encodings' % run_no)
+            encoded_file = handle_filename(encoded_file, train_set)
             np.save(encoded_file, encodings[0])
 
             labels_file = os.path.join(
                 pickles_folder, '%s_labels' % run_no)
+            labels_file = handle_filename(labels_file, train_set)
             np.save(labels_file, encodings[1])
 
     def get_saves_path(self, run_no):
@@ -390,7 +405,6 @@ class Encoder:
             print("\t!!!RBM model save file .ckpt with run_no: "
                   "%s not exists!!!" % self.rbm_run_no)
             exit()
-
 
     def define_runner_folders(self):
         os.makedirs(self.main_logs_dir, exist_ok=True)

@@ -275,19 +275,24 @@ class RBM:
             self.saver.save(self.tf_session, self.saves_path)
         return self.params
 
-    def test(self, run_no):
+    def test(self, run_no, train_set=False, plot_images=False):
         self.build_model()
         self.saver = tf.train.Saver()
         self.get_saves_path(run_no)
-        show = True
+        show = plot_images
         pickles_folder = '/tmp/rbm_reconstr'
         os.makedirs(pickles_folder, exist_ok=True)
         with tf.Session() as self.tf_session:
             self.saver.restore(self.tf_session, self.saves_path)
             batch_size = self.params['batch_size']
-            test_batches = self.data_provider.get_test_set_iter(
-                batch_size, shuffle=False)
-            total_examples = 10000
+            if not train_set:
+                test_batches = self.data_provider.get_test_set_iter(
+                    batch_size, shuffle=False)
+                total_examples = 10000
+            else:
+                test_batches = self.data_provider.get_train_set_iter(
+                    batch_size, shuffle=False)
+                total_examples = 55000
             reconstructs = np.zeros((total_examples, 784))
             encodings = [
                 np.zeros((total_examples, 100)),
@@ -348,16 +353,27 @@ class RBM:
                     Image.fromarray(stacked_images).show()
                     show = False
 
+            def handle_filename(f_name, train_set):
+                """Depends on train or test set change filename"""
+                if train_set:
+                    f_name += '_train_set'
+                else:
+                    f_name += '_test_set'
+                return f_name
+
             reconstr_file = os.path.join(
                 pickles_folder, '%s_reconstr' % run_no)
+            reconstr_file = handle_filename(reconstr_file, train_set)
             np.save(reconstr_file, reconstructs)
 
             encoded_file = os.path.join(
                 pickles_folder, '%s_encodings' % run_no)
+            encoded_file = handle_filename(encoded_file, train_set)
             np.save(encoded_file, encodings[0])
 
             labels_file = os.path.join(
                 pickles_folder, '%s_labels' % run_no)
+            labels_file = handle_filename(labels_file, train_set)
             np.save(labels_file, encodings[1])
 
     def get_saves_path(self, run_no):

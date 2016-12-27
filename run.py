@@ -10,6 +10,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--test', action='store_true')
 parser.add_argument('--dynamic', action='store_true')
 parser.add_argument('--run_no', type=str)
+parser.add_argument(
+    '--train_set', action='store_true',
+    help='Should we use train set for evaluation')
+parser.add_argument(
+    '--plot_images', action='store_true',
+    help='Plot some weights/reconstruction at the evaluation')
 args = parser.parse_args()
 
 params = {
@@ -62,7 +68,7 @@ if not args.test:
             params=params)
         rmb_model.train()
 
-else:
+if args.test:
     if not args.run_no:
         print("\nYou should provide run_no of model to test!\n")
         exit()
@@ -74,4 +80,8 @@ else:
         rmb_model = RBM(
             data_provider=mnist_provider,
             params=params)
-    rmb_model.test(run_no=args.run_no)
+    rmb_model.test(
+        run_no=args.run_no,
+        train_set=args.train_set,
+        plot_images=args.plot_images,
+    )
