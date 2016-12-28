@@ -1,7 +1,6 @@
 import time
 import datetime
 import os
-from pprint import pprint
 
 import tensorflow as tf
 import numpy as np
@@ -9,7 +8,7 @@ import tflearn
 from PIL import Image
 from scipy.misc import toimage
 
-from utils import tile_raster_images, scale_to_unit_interval
+from utils import tile_raster_images
 
 
 class Encoder:
@@ -18,13 +17,10 @@ class Encoder:
         params['global_step'] = params.get('global_step', 0)
         self.params = dict(params)
         self.n_features = data_provider.shapes['inputs']
-        self.gibbs_sampling_steps = params.get('gibbs_sampling_steps', 1)
         self.layers_qtty = params.get('layers_qtty', 1)
         self.rbm_saves_dir = "/tmp/rbm_saves"
         self.main_save_dir = "/tmp/rbm_aec_saves"
         self.main_logs_dir = "/tmp/rbm_aec_logs"
-        self.model_was_built = False
-        self.bin_type = params.get('bin_type', True)
         self.bin_code_width = params['layers_sizes'][-1]
         self.rbm_run_no = rbm_run_no
 
@@ -69,12 +65,10 @@ class Encoder:
         self.reconstr = result
         self.reconstr_prob = tf.sigmoid(result)
 
-        # loss
+        # define cost and optimizer
         self.cost = tf.reduce_mean(
             tf.nn.sigmoid_cross_entropy_with_logits(
                 self.reconstr, self.inputs))
-        # # TODO: require additional variables initialization
-        # optimizer = tf.train.AdamOptimizer(self.params['learning_rate'])
         optimizer = tf.train.GradientDescentOptimizer(
             self.params['learning_rate'])
         self.minimization = optimizer.minimize(self.cost)
@@ -116,7 +110,7 @@ class Encoder:
             setattr(self, w_name, weights)
             created_variables.append(weights)
 
-            bias_name = "bias_%d" % layer_no_to
+            bias_name = self._get_bias_name(layer_no_to)
             bias = tf.Variable(
                 tf.constant(0.1, shape=[layers_sizes[layer_no_to]]),
                 name=bias_name)
@@ -136,7 +130,7 @@ class Encoder:
             setattr(self, w_name, weights)
             created_variables.append(weights)
 
-            bias_name = "bias_%d" % layer_no_to
+            bias_name = self._get_bias_name(layer_no_to)
             bias = tf.Variable(
                 tf.constant(0.1, shape=[layers_sizes[layer_idx]]),
                 name=bias_name)
@@ -187,9 +181,9 @@ class Encoder:
             restore_dict[w_name_saved] = weights_attr
             restored_variables.append(weights_attr)
 
-            bias_name_attr = "bias_%d" % (layer_counter + 1)
+            bias_name_attr = self._get_bias_name(layer_counter + 1)
             bias_attr = getattr(self, bias_name_attr)
-            bias_name_saved = "bias_%d" % layer_no
+            bias_name_saved = self._get_bias_name(layer_no)
             restore_dict[bias_name_saved] = bias_attr
             restored_variables.append(bias_attr)
 
@@ -219,6 +213,7 @@ class Encoder:
             self.summary_writer.add_summary(
                 summary_str, self.params['global_step'])
             self.params['global_step'] += 1
+            
             # perform validation
             if batch_no % 11 == 0 and self.params['validate']:
                 valid_batch = next(valid_batches)
@@ -244,16 +239,15 @@ class Encoder:
                 valid_loss = float(valid_loss)
                 summary_str = tf.Summary(value=[
                     tf.Summary.Value(
-                        tag="valid_loss_without_noise", simple_value=valid_loss)]
+                        tag="valid_loss_without_noise",
+                        simple_value=valid_loss
+                    )]
                 )
                 self.summary_writer.add_summary(
                     summary_str, self.params['global_step'])
 
     def train(self):
-        self.get_rbm_saves_path()
-        if not self.model_was_built:
-            self.build_model()
-            self.model_was_built = True
+        self.build_model()
         self.define_runner_folders()
         # saver to save all params
         saver = tf.train.Saver()
@@ -263,15 +257,24 @@ class Encoder:
         with tf.Session(config=config) as sess:
             self.tf_session = sess
 
-            print("Preload variables from previous RMB run_no: %s" %
-                  self.rbm_run_no)
-            restore_vars_dict_forward = self._get_restored_variables_names_forward_layers()
-            restorer_forward = tf.train.Saver(restore_vars_dict_forward)
-            restorer_forward.restore(self.tf_session, self.preload_path)
+            # initialize encoder from previously trained RBM
+            if self.rbm_run_no:
+                self.get_rbm_saves_path()
+                print("Preload variables from previous RMB run_no: %s" %
+                      self.rbm_run_no)
+                restore_vars_dict_forward = \
+                    self._get_restored_variables_names_forward_layers()
+                restorer_forward = tf.train.Saver(restore_vars_dict_forward)
+                restorer_forward.restore(self.tf_session, self.preload_path)
 
-            restore_vars_dict_backward = self._get_restored_variables_names_backward_layers()
-            restorer_backward = tf.train.Saver(restore_vars_dict_backward)
-            restorer_backward.restore(self.tf_session, self.preload_path)
+                restore_vars_dict_backward = \
+                    self._get_restored_variables_names_backward_layers()
+                restorer_backward = tf.train.Saver(restore_vars_dict_backward)
+                restorer_backward.restore(self.tf_session, self.preload_path)
+
+            # initialize encoder with new variables
+            else:
+                tf.initialize_all_variables().run()
 
             self.summary_writer = tf.train.SummaryWriter(
                 self.logs_dir, self.tf_session.graph)
@@ -350,7 +353,6 @@ class Encoder:
                             tile_shape=(tile_h_w, tile_h_w),
                             tile_spacing=(2, 2))
                         )
-                        # images_stack.append(np.array(tiled_weights_image))
                         tiled_weights_image.show()
                         toimage(weight.T).show()
 

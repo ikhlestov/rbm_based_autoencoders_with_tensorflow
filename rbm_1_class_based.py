@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 from scipy.misc import toimage
 
-from utils import tile_raster_images, scale_to_unit_interval
+from utils import tile_raster_images
 
 
 class RBM:
@@ -20,7 +20,6 @@ class RBM:
         self.layers_qtty = params.get('layers_qtty', 1)
         self.main_save_dir = "/tmp/rbm_saves"
         self.main_logs_dir = "/tmp/rbm_logs"
-        self.model_was_built = False
         self.bin_type = params.get('bin_type', True)
 
     def build_model(self):
@@ -212,11 +211,6 @@ class RBM:
         positive = tf.matmul(tf.transpose(visible), hidden_states)
         return positive
 
-    def _create_feed_dict(self, data):
-        return {
-            self.inputs: data,
-        }
-
     def _epoch_train_step(self):
         params = self.params
         batches = self.data_provider.get_train_set_iter(
@@ -227,7 +221,7 @@ class RBM:
         for batch_no, train_batch in enumerate(batches):
             train_inputs, train_targets = train_batch
             feed_dict = {self.inputs: train_inputs}
-            fetched = self.tf_session.run(fetches, feed_dict=feed_dict)
+            fetched = self.sess.run(fetches, feed_dict=feed_dict)
             summary_str = fetched[-1]
             self.summary_writer.add_summary(
                 summary_str, self.params['global_step'])
@@ -237,7 +231,7 @@ class RBM:
                 valid_batch = next(valid_batches)
                 valid_inputs, valid_targets = valid_batch
                 feed_dict = {self.inputs: valid_inputs}
-                valid_loss = self.tf_session.run(
+                valid_loss = self.sess.run(
                     self.cost, feed_dict=feed_dict)
                 valid_loss = float(valid_loss)
                 summary_str = tf.Summary(value=[
@@ -247,32 +241,29 @@ class RBM:
                 self.summary_writer.add_summary(
                     summary_str, self.params['global_step'])
 
-    def _epoch_validate_step(self):
-        pass
-
     def train(self):
-        if not self.model_was_built:
-            self.build_model()
-            self.model_was_built = True
+        self.build_model()
         prev_run_no = self.params.get('run_no', None)
         self.define_runner_folders()
-        self.saver = tf.train.Saver()
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
-        with tf.Session(config=config) as self.tf_session:
+        with tf.Session(config=config) as sess:
+            self.sess = sess
             if prev_run_no:
-                self.saver.restore(self.tf_session, self.saves_path)
+                self.saver.restore(sess, self.saves_path)
             else:
                 tf.initialize_all_variables().run()
             self.summary_writer = tf.train.SummaryWriter(
-                self.logs_dir, self.tf_session.graph)
+                self.logs_dir, sess.graph)
             for epoch in range(self.params['epochs']):
                 start = time.time()
                 self._epoch_train_step()
                 time_cons = time.time() - start
                 time_cons = str(datetime.timedelta(seconds=time_cons))
                 print("Epoch: %d, time consumption: %s" % (epoch, time_cons))
-            self.saver.save(self.tf_session, self.saves_path)
+
+            self.saver = tf.train.Saver()
+            self.saver.save(sess, self.saves_path)
         return self.params
 
     def test(self, run_no, train_set=False, plot_images=False):
@@ -282,8 +273,8 @@ class RBM:
         show = plot_images
         pickles_folder = '/tmp/rbm_reconstr'
         os.makedirs(pickles_folder, exist_ok=True)
-        with tf.Session() as self.tf_session:
-            self.saver.restore(self.tf_session, self.saves_path)
+        with tf.Session() as sess:
+            self.saver.restore(sess, self.saves_path)
             batch_size = self.params['batch_size']
             if not train_set:
                 test_batches = self.data_provider.get_test_set_iter(
@@ -306,7 +297,7 @@ class RBM:
                         getattr(self, "W_%d_%d" % (layer_no, layer_no + 1)))
                 fetches.append(self.encoded_array)
                 fetches.append(self.reconstruction)
-                fetched = self.tf_session.run(
+                fetched = sess.run(
                     fetches, feed_dict=feed_dict)
                 reconstr = fetched[-1]
                 encoded = fetched[-2]
@@ -330,13 +321,14 @@ class RBM:
                     images_stack.append(tiled_initial_images)
 
                     for weight in weights:
-                        print("weight shape: ", weight.shape)
                         img_shape = int(np.sqrt(weight.shape[0]))
-                        tiled_weights_image = Image.fromarray(tile_raster_images(
-                            weight.T,
-                            img_shape=(img_shape, img_shape),
-                            tile_shape=(tile_h_w, tile_h_w),
-                            tile_spacing=(2, 2))
+                        tiled_weights_image = Image.fromarray(
+                            tile_raster_images(
+                                weight.T,
+                                img_shape=(img_shape, img_shape),
+                                tile_shape=(tile_h_w, tile_h_w),
+                                tile_spacing=(2, 2)
+                            )
                         )
                         # images_stack.append(np.array(tiled_weights_image))
                         tiled_weights_image.show()

@@ -32,19 +32,16 @@ params = {
     'batch_size': 100,
     'validate': True,
     'shuffle': True,
-    'gibbs_sampling_steps': 1,
     'layers_qtty': 3,
-    'layers_sizes': [784, 484, 196, 100],  # [n_input_features, layer_1, ...]
+    # [n_input_features, layer_1, ...]
+    'layers_sizes': [784, 484, 196, 100],
     'notes': 'bin_type=%s' % str(args.bin_type),
 }
 
 mnist_provider = MNISTDataProvider(bin_code_width=params['layers_sizes'][-1])
-
-initial_params = dict(params)
-
 model = Encoder(
     data_provider=mnist_provider,
-    params=initial_params,
+    params=params,
     rbm_run_no=args.rbm_run_no)
 
 if not args.test:
