@@ -8,7 +8,7 @@ import tflearn
 from PIL import Image
 from scipy.misc import toimage
 
-from utils import tile_raster_images
+from vis_utils import tile_raster_images
 
 
 class Encoder:
@@ -22,6 +22,7 @@ class Encoder:
         self.main_save_dir = "/tmp/rbm_aec_saves"
         self.main_logs_dir = "/tmp/rbm_aec_logs"
         self.bin_code_width = params['layers_sizes'][-1]
+        self.pickles_folder = '/tmp/rbm_aec_reconstr'
         self.rbm_run_no = rbm_run_no
 
     def build_model(self):
@@ -279,107 +280,117 @@ class Encoder:
         return self.params
 
     def test(self, run_no, train_set=False, plot_images=False):
+        tf.reset_default_graph()
         self.build_model()
         self.saver = tf.train.Saver()
         self.get_saves_path(run_no)
-        show = plot_images
-        pickles_folder = '/tmp/rbm_aec_reconstr'
-        os.makedirs(pickles_folder, exist_ok=True)
+        os.makedirs(self.pickles_folder, exist_ok=True)
         with tf.Session() as self.tf_session:
             tflearn.is_training(False)
             self.saver.restore(self.tf_session, self.saves_path)
-            batch_size = self.params['batch_size']
-            if not train_set:
-                test_batches = self.data_provider.get_test_set_iter(
-                    batch_size, shuffle=False, noise=True)
-                total_examples = 10000
-            else:
-                test_batches = self.data_provider.get_train_set_iter(
-                    batch_size, shuffle=False, noise=True)
-                total_examples = 55000
-            reconstructs = np.zeros((total_examples, 784))
-            encodings = [
-                np.zeros((total_examples, 100)),
-                np.zeros((total_examples, 10))
-            ]
-            for batch_no, batch in enumerate(test_batches):
-                feed_dict = {
-                    self.inputs: batch[0],
-                    self.noise: batch[2]}
-                fetches = []
-                for layer_no in range(self.params['layers_qtty']):
-                    fetches.append(
-                        getattr(self, "W_%d_%d" % (layer_no, layer_no + 1)))
-                fetches.append(self.encoded_array)
-                fetches.append(self.reconstr_prob)
-                fetched = self.tf_session.run(
-                    fetches, feed_dict=feed_dict)
-                reconstr = fetched[-1]
-                encoded = fetched[-2]
-                weights = fetched[:-2]
+            print("Get embeddings for test set")
+            self._get_embeddings(
+                self.tf_session, run_no, train_set=True,
+                plot_images=plot_images)
+            print("Get embeddings for train set")
+            self._get_embeddings(
+                self.tf_session, run_no, train_set=True,
+                plot_images=plot_images)
 
-                slice_start = batch_no * batch_size
-                slice_end = (batch_no + 1) * batch_size
-                encodings[0][slice_start: slice_end] = encoded
-                encodings[1][slice_start: slice_end] = batch[1]
-                reconstructs[slice_start: slice_end] = reconstr
+    def _get_embeddings(self, sess, run_no, train_set=False,
+                        plot_images=False):
+        batch_size = self.params['batch_size']
+        if not train_set:
+            test_batches = self.data_provider.get_test_set_iter(
+                batch_size, shuffle=False, noise=True)
+            total_examples = 10000
+        else:
+            test_batches = self.data_provider.get_train_set_iter(
+                batch_size, shuffle=False, noise=True)
+            total_examples = 55000
+        reconstructs = np.zeros((total_examples, 784))
+        encodings = [
+            np.zeros((total_examples, 100)),
+            np.zeros((total_examples, 10))
+        ]
+        for batch_no, batch in enumerate(test_batches):
+            feed_dict = {
+                self.inputs: batch[0],
+                self.noise: batch[2]}
+            fetches = []
+            for layer_no in range(self.params['layers_qtty']):
+                fetches.append(
+                    getattr(self, "W_%d_%d" % (layer_no, layer_no + 1)))
+            fetches.append(self.encoded_array)
+            fetches.append(self.reconstr_prob)
+            fetched = self.tf_session.run(
+                fetches, feed_dict=feed_dict)
+            reconstr = fetched[-1]
+            encoded = fetched[-2]
+            weights = fetched[:-2]
 
-                if show:
-                    tile_h_w = 10
-                    images_stack = []
-                    tiled_initial_images = tile_raster_images(
-                        batch[0],
-                        img_shape=(28, 28),
+            slice_start = batch_no * batch_size
+            slice_end = (batch_no + 1) * batch_size
+            encodings[0][slice_start: slice_end] = encoded
+            encodings[1][slice_start: slice_end] = batch[1]
+            reconstructs[slice_start: slice_end] = reconstr
+
+            if plot_images:
+                tile_h_w = 10
+                images_stack = []
+                tiled_initial_images = tile_raster_images(
+                    batch[0],
+                    img_shape=(28, 28),
+                    tile_shape=(tile_h_w, tile_h_w),
+                    tile_spacing=(2, 2)
+                )
+                images_stack.append(tiled_initial_images)
+
+                for weight in weights:
+                    print("weight shape: ", weight.shape)
+                    img_shape = int(np.sqrt(weight.shape[0]))
+                    tiled_weights_image = Image.fromarray(tile_raster_images(
+                        weight.T,
+                        img_shape=(img_shape, img_shape),
                         tile_shape=(tile_h_w, tile_h_w),
-                        tile_spacing=(2, 2)
+                        tile_spacing=(2, 2))
                     )
-                    images_stack.append(tiled_initial_images)
+                    tiled_weights_image.show()
+                    toimage(weight.T).show()
 
-                    for weight in weights:
-                        print("weight shape: ", weight.shape)
-                        img_shape = int(np.sqrt(weight.shape[0]))
-                        tiled_weights_image = Image.fromarray(tile_raster_images(
-                            weight.T,
-                            img_shape=(img_shape, img_shape),
-                            tile_shape=(tile_h_w, tile_h_w),
-                            tile_spacing=(2, 2))
-                        )
-                        tiled_weights_image.show()
-                        toimage(weight.T).show()
+                tiled_reconst_image = Image.fromarray(tile_raster_images(
+                    reconstr,
+                    img_shape=(28, 28),
+                    tile_shape=(tile_h_w, tile_h_w),
+                    tile_spacing=(2, 2)))
+                images_stack.append(np.array(tiled_reconst_image))
 
-                    tiled_reconst_image = Image.fromarray(tile_raster_images(
-                        reconstr,
-                        img_shape=(28, 28),
-                        tile_shape=(tile_h_w, tile_h_w),
-                        tile_spacing=(2, 2)))
-                    images_stack.append(np.array(tiled_reconst_image))
+                stacked_images = np.hstack(images_stack)
+                Image.fromarray(stacked_images).show()
+                plot_images = False
 
-                    stacked_images = np.hstack(images_stack)
-                    Image.fromarray(stacked_images).show()
-                    show = False
+        def handle_filename(f_name, train_set):
+            """Depends on train or test set change filename"""
+            if train_set:
+                f_name += '_train_set'
+            else:
+                f_name += '_test_set'
+            return f_name
 
-            def handle_filename(f_name, train_set):
-                """Depends on train or test set change filename"""
-                if train_set:
-                    f_name += '_train_set'
-                else:
-                    f_name += '_test_set'
-                return f_name
+        reconstr_file = os.path.join(
+            self.pickles_folder, '%s_reconstr' % run_no)
+        reconstr_file = handle_filename(reconstr_file, train_set)
+        np.save(reconstr_file, reconstructs)
 
-            reconstr_file = os.path.join(
-                pickles_folder, '%s_reconstr' % run_no)
-            reconstr_file = handle_filename(reconstr_file, train_set)
-            np.save(reconstr_file, reconstructs)
+        encoded_file = os.path.join(
+            self.pickles_folder, '%s_encodings' % run_no)
+        encoded_file = handle_filename(encoded_file, train_set)
+        np.save(encoded_file, encodings[0])
 
-            encoded_file = os.path.join(
-                pickles_folder, '%s_encodings' % run_no)
-            encoded_file = handle_filename(encoded_file, train_set)
-            np.save(encoded_file, encodings[0])
-
-            labels_file = os.path.join(
-                pickles_folder, '%s_labels' % run_no)
-            labels_file = handle_filename(labels_file, train_set)
-            np.save(labels_file, encodings[1])
+        labels_file = os.path.join(
+            self.pickles_folder, '%s_labels' % run_no)
+        labels_file = handle_filename(labels_file, train_set)
+        np.save(labels_file, encodings[1])
 
     def get_saves_path(self, run_no):
         saves_dir = os.path.join(self.main_save_dir, run_no)
@@ -409,3 +420,4 @@ class Encoder:
         if notes:
             self.logs_dir = self.logs_dir + '_' + notes
         self.get_saves_path(run_no)
+        self.run_no = run_no

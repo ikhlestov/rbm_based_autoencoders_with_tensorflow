@@ -53,10 +53,7 @@ class MNISTDataProvider(BaseDataProvider):
             self.noise_valid = np.load(self.valid_noise_path + '.npy')
             self.noise_test = np.load(self.test_noise_path + '.npy')
             if self.noise_train.shape[-1] != self.bin_code_width:
-                print("Existed noise was preloaded, but bin shape %d != %d" %
-                    (self.noise_train.shape[-1], self.bin_code_width))
                 raise FileNotFoundError
-            print("Existed noise was preloaded")
         except FileNotFoundError:
             # if no previous noise was found - generate and savee new one
             pathes = [
@@ -71,7 +68,6 @@ class MNISTDataProvider(BaseDataProvider):
             ]
             for shape, path in zip(shapes, pathes):
                 self.generate_save_noise(shape, path)
-            print("New noise was generated")
 
     def generate_save_noise(self, shape, path):
         data_qtty = shape[0]

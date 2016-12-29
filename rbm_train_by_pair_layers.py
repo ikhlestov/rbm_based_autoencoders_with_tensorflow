@@ -1,22 +1,20 @@
-import os
 import time
 import datetime
 
 import tensorflow as tf
-from PIL import Image
 
-from utils import tile_raster_images
-from rbm_1_class_based import RBM
+from rbm_base import RBMBase
 
 
-class RBMDynamic(RBM):
+class RBMTrainByPairs(RBMBase):
     def build_model(self):
         self._create_placeholders()
         self._create_variables()
 
         # pass input through previous layers to construct right input
+        layers_qtty = self.params.get('layers_qtty', 1)
         inputs = self.inputs
-        for layer_no in range(self.layers_qtty - 1):
+        for layer_no in range(layers_qtty - 1):
             hid_layer_no = layer_no + 1
             hid_probs, hid_states = self._sample_hidden_from_visible(
                 inputs, hid_layer_no)
@@ -27,8 +25,8 @@ class RBMDynamic(RBM):
 
         # now enable RBM for last two layers
         self.updates = []
-        layer_from = self.layers_qtty - 1
-        layer_to = self.layers_qtty
+        layer_from = layers_qtty - 1
+        layer_to = layers_qtty
         tmp_res = self.rbm_block(
             inputs=inputs, layer_from=layer_from, layer_to=layer_to)
         updates, vprob_last, hprob_last, hstate_last = tmp_res
@@ -40,7 +38,7 @@ class RBMDynamic(RBM):
             last_out = hstate_last
         else:
             last_out = hprob_last
-        for vis_layer_no in list(reversed(range(self.layers_qtty))):
+        for vis_layer_no in list(reversed(range(layers_qtty))):
             last_out = self._sample_visible_from_hidden(
                 hidden_units=last_out, vis_layer_no=vis_layer_no)
         self.reconstruction = last_out
@@ -77,6 +75,19 @@ class RBMDynamic(RBM):
         return new_vars
 
     def train(self):
+        initial_params = dict(self.params)
+        params = self.params
+        epochs_per_pair = params['epochs'] // params['layers_qtty']
+        for layers_qtty in range(1, initial_params['layers_qtty'] + 1):
+            tf.reset_default_graph()
+            print("Train layers pair %d and %d for %d epochs" % (
+                layers_qtty - 1, layers_qtty, epochs_per_pair))
+            self.params['epochs'] = epochs_per_pair
+            self.params['layers_qtty'] = layers_qtty
+            self.params['layers_sizes'] = initial_params['layers_sizes'][:layers_qtty + 1]
+            self._train_layer_pair()
+
+    def _train_layer_pair(self):
         self.build_model()
         prev_run_no = self.params.get('run_no', None)
         self.define_runner_folders()
@@ -113,4 +124,3 @@ class RBMDynamic(RBM):
             # Save all trained variables
             saver = tf.train.Saver()
             saver.save(sess, self.saves_path)
-        return self.params

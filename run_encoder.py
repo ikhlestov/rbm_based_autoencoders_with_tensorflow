@@ -1,6 +1,6 @@
 import argparse
 
-from autoencoder_1 import Encoder
+from autoencoder import Encoder
 from data_providers import MNISTDataProvider
 
 
@@ -9,15 +9,16 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     '--rbm_run_no', type=str,
     help="Get from what RMB run_no autoencoder model should be preloaded")
+parser.add_argument(
+    '--test_trained', action='store_true',
+    help="Should trained model be fetched for embeddings in place")
 # args for testing
 parser.add_argument(
-    '--test', action='store_true')
+    '--test', action='store_true',
+    help="Get embeddings for required model")
 parser.add_argument(
     '--run_no', type=str,
     help='What training model should be tested')
-parser.add_argument(
-    '--train_set', action='store_true',
-    help='Should we use train set for evaluation')
 parser.add_argument(
     '--plot_images', action='store_true',
     help='Plot some weights/reconstruction at the evaluation')
@@ -45,14 +46,21 @@ model = Encoder(
     params=params,
     rbm_run_no=args.rbm_run_no)
 
+test_run_no = None
 if not args.test:
-    print("Training the model")
     model.train()
+    if args.test_trained:
+        test_run_no = model.run_no
 
 if args.test:
-    print("Testing the model")
+    if not args.run_no:
+        print("\nYou should provide run_no of model to test!\n")
+        exit()
+    else:
+        test_run_no = args.run_no
+
+if test_run_no is not None:
     model.test(
-        run_no=args.run_no,
-        train_set=args.train_set,
+        run_no=test_run_no,
         plot_images=args.plot_images
     )
