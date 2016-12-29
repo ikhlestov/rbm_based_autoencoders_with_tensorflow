@@ -7,9 +7,6 @@ from data_providers import MNISTDataProvider
 parser = argparse.ArgumentParser()
 # args for training
 parser.add_argument(
-    '--bin_type', action='store_true',
-    help='From what RMB model autoencoder was inherited')
-parser.add_argument(
     '--rbm_run_no', type=str,
     help="Get from what RMB run_no autoencoder model should be preloaded")
 # args for testing
@@ -35,8 +32,12 @@ params = {
     'layers_qtty': 3,
     # [n_input_features, layer_1, ...]
     'layers_sizes': [784, 484, 196, 100],
-    'notes': 'bin_type=%s' % str(args.bin_type),
 }
+
+if args.rbm_run_no:
+    params['notes'] = 'rbm_initialized_model'
+if not args.rbm_run_no:
+    params['notes'] = 'new_initialized_model'
 
 mnist_provider = MNISTDataProvider(bin_code_width=params['layers_sizes'][-1])
 model = Encoder(

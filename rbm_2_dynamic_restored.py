@@ -83,7 +83,7 @@ class RBMDynamic(RBM):
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
         with tf.Session(config=config) as sess:
-            self.tf_session = sess
+            self.sess = sess
 
             if prev_run_no:
                 print("Restore variables from previous run:")

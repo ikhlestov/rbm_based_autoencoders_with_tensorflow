@@ -213,7 +213,7 @@ class Encoder:
             self.summary_writer.add_summary(
                 summary_str, self.params['global_step'])
             self.params['global_step'] += 1
-            
+
             # perform validation
             if batch_no % 11 == 0 and self.params['validate']:
                 valid_batch = next(valid_batches)
@@ -222,16 +222,7 @@ class Encoder:
                     self.inputs: valid_inputs,
                     self.noise: valid_noise
                 }
-                # validation with random noise
-                valid_loss = self.tf_session.run(
-                    self.cost, feed_dict=feed_dict)
-                valid_loss = float(valid_loss)
-                summary_str = tf.Summary(value=[
-                    tf.Summary.Value(
-                        tag="valid_loss_with_noise", simple_value=valid_loss)]
-                )
-                self.summary_writer.add_summary(
-                    summary_str, self.params['global_step'])
+
                 # validation without random noise
                 tflearn.is_training(False)
                 valid_loss = self.tf_session.run(
@@ -239,7 +230,7 @@ class Encoder:
                 valid_loss = float(valid_loss)
                 summary_str = tf.Summary(value=[
                     tf.Summary.Value(
-                        tag="valid_loss_without_noise",
+                        tag="valid_loss",
                         simple_value=valid_loss
                     )]
                 )
