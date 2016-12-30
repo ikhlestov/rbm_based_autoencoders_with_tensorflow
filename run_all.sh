@@ -18,4 +18,4 @@ python results_validation/visualize_distribution.py --emb_path $BASE_PATH/0_enco
 printf '\n===== Evaluate embeddings though SVM =====\n'
 python results_validation/svm_clusterization_test.py --test_cases rbm:0 aec_rbm:0 aec_rbm:1
 printf '\n===== Evaluate embeddings though most similar accuracy\n'
-python results_validation/found_similiar.py --test_cases rbm:0 aec_rbm:0 aec_rbm:1
+python results_validation/find_similar.py --test_cases rbm:0 aec_rbm:0 aec_rbm:1

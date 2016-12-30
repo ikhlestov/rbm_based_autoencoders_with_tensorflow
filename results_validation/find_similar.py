@@ -25,7 +25,7 @@ parser.add_argument(
          "ex: --test_cases rbm:0 rbm:1 rbm_aec:0 rbm_aec:1")
 parser.add_argument(
     '--csv_res_path', type=str,
-    default='/tmp/found_similiar_accuracy_results.csv',
+    default='/tmp/find_similar_accuracy_results.csv',
     help="Where metrics from evaluation should be saved")
 args = parser.parse_args()
 

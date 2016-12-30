@@ -38,7 +38,7 @@ args = parser.parse_args()
 
 params = {
     'epochs': 6,
-    'learning_rate': 0.01,
+    'learning_rate': 1.0,
     'batch_size': 100,
     'validate': True,
     'shuffle': True,
