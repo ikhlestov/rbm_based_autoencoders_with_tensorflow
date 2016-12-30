@@ -1,3 +1,8 @@
+"""Run RMB in various modes
+Example usages:
+python run_rbm.py --pair_training --test_trained
+python run_rbm.py --binary
+"""
 import argparse
 
 from rbm_all_layers_at_once import RBMAllAtOnce

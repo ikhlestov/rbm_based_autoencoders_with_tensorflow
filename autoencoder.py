@@ -203,7 +203,12 @@ class Encoder:
         valid_batches = self.data_provider.get_validation_set_iter(
             params['batch_size'], params['shuffle'], noise=True)
         for batch_no, train_batch in enumerate(batches):
-            tflearn.is_training(True)
+            # train with Gaussian noise prior embeddings layer
+            if not self.params['without_noise']:
+                tflearn.is_training(True)
+            # train without Gaussian noise prior embedding layer
+            if self.params['without_noise']:
+                tflearn.is_training(False)
             train_inputs, train_targets, train_noise = train_batch
             feed_dict = {
                 self.inputs: train_inputs,
@@ -290,7 +295,7 @@ class Encoder:
             self.saver.restore(self.tf_session, self.saves_path)
             print("Get embeddings for test set")
             self._get_embeddings(
-                self.tf_session, run_no, train_set=True,
+                self.tf_session, run_no, train_set=False,
                 plot_images=plot_images)
             print("Get embeddings for train set")
             self._get_embeddings(

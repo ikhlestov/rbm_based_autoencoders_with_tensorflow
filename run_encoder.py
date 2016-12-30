@@ -1,3 +1,12 @@
+"""Run autoencoder with weight initialized from RBM or newly created.
+Example usages:
+# train newly created autoencoder
+`python run_encoder.py`
+# train autoencoder initialized from RBM
+`python run_encoder.py --rbm_run_no=0`
+Also take a look at the params for noise adding and testing in place after
+training.
+"""
 import argparse
 
 from autoencoder import Encoder
@@ -9,6 +18,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     '--rbm_run_no', type=str,
     help="Get from what RMB run_no autoencoder model should be preloaded")
+parser.add_argument(
+    '--without_noise', action='store_true',
+    help='Train autoencoder without Gaussian noise prior embeddings level')
 parser.add_argument(
     '--test_trained', action='store_true',
     help="Should trained model be fetched for embeddings in place")
@@ -26,19 +38,26 @@ args = parser.parse_args()
 
 params = {
     'epochs': 6,
-    'learning_rate': 0.5,
+    'learning_rate': 0.01,
     'batch_size': 100,
     'validate': True,
     'shuffle': True,
     'layers_qtty': 3,
     # [n_input_features, layer_1, ...]
     'layers_sizes': [784, 484, 196, 100],
+    'without_noise': args.without_noise
 }
 
 if args.rbm_run_no:
-    params['notes'] = 'rbm_initialized_model'
+    notes = 'rbm_initialized_model'
 if not args.rbm_run_no:
-    params['notes'] = 'new_initialized_model'
+    notes = 'new_initialized_model'
+
+if not args.without_noise:
+    notes += '__with_Gaussian_noise'
+if args.without_noise:
+    notes += '__without_Gaussian_noise'
+params['notes'] = notes
 
 mnist_provider = MNISTDataProvider(bin_code_width=params['layers_sizes'][-1])
 model = Encoder(

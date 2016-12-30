@@ -211,7 +211,7 @@ class RBMBase:
             self.saver.restore(sess, self.saves_path)
             print("Get embeddings for test set")
             self._get_embeddings(
-                sess, run_no, train_set=True, plot_images=plot_images)
+                sess, run_no, train_set=False, plot_images=plot_images)
             print("Get embeddings for train set")
             self._get_embeddings(
                 sess, run_no, train_set=True, plot_images=plot_images)

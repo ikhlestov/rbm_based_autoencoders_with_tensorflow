@@ -1,112 +1,159 @@
+"""Whith some distance metric(hamming or dot product) retrieve 10 most similiar
+embeddings to provided one and measure how many labels are correct.
+Preform this for all dataset and calculate mean accuracy.
+Example usage:
+python results_validation/found_similiar.py --test_cases rbm:0 aec_rbm:0 aec_rbm:1
+"""
 import time
-from datetime import timedelta
+import argparse
+import os
+import csv
+
 
 from tqdm import tqdm
 import numpy as np
-from PIL import Image
-from scipy.misc import toimage
-import matplotlib.image as mpimg
-import matplotlib.pyplot as plt
 from tensorflow.examples.tutorials import mnist
 
-
-def binarize_encodings(encodings, threshold=0.2):
-    encodings[encodings > threshold] = 1
-    encodings[encodings <= threshold] = 0
-    encodings = encodings.astype('i4')
-    return encodings
+from utils import get_notes_from_case, binarize_encodings
 
 
-MNIST = True
-if not MNIST:
-    print("Not MNIST data")
-    test_set = np.load('/tmp/rbm_aec_reconstr/0_encodings_test_set.npy')
-    test_set = binarize_encodings(test_set)
-    test_labels = np.load('/tmp/rbm_aec_reconstr/0_labels_test_set.npy')
-    test_labels = np.argmax(test_labels, axis=1)
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    '--test_cases', type=str, required=True, nargs='+',
+    help="Indexes of runs that should be tested."
+         "Should be provided as net_type:idx"
+         "ex: --test_cases rbm:0 rbm:1 rbm_aec:0 rbm_aec:1")
+parser.add_argument(
+    '--csv_res_path', type=str,
+    default='/tmp/found_similiar_accuracy_results.csv',
+    help="Where metrics from evaluation should be saved")
+args = parser.parse_args()
 
-if MNIST:
-    print("MNIST data")
-    mnist_data = mnist.input_data.read_data_sets(
-                "/tmp/MNIST_data/", one_hot=False)
-    test_set = mnist_data.test.images
-    test_set = binarize_encodings(test_set)
-    test_labels = mnist_data.test.labels
+fetch_qtty = 10
+weighted_dist = False
+
+test_cases = [
+    {'type': 'default_mnist',
+     'notes': 'default mnist dataset'},
+]
+
+for case in args.test_cases:
+    case_type, run_no = case.split(':')
+    notes = get_notes_from_case(case_type, run_no)
+    test_cases.append({'type': case_type,
+                       'run_no': run_no,
+                       'notes': notes})
 
 
-def found_similiar_indexes_dot_product(test_array, qtty=10):
+def get_data(main_path, run_no):
+    encodings_test = np.load(
+        os.path.join(main_path, '%s_encodings_test_set.npy' % run_no))
+    labels_test_one_hot = np.load(
+        os.path.join(main_path, '%s_labels_test_set.npy' % run_no))
+    return encodings_test, labels_test_one_hot
+
+
+def found_similiar_indexes_dot_product(test_array, test_set, qtty=10):
     dot_prod = (np.dot(test_set, test_array) /
                 np.linalg.norm(test_set, axis=1) /
                 np.linalg.norm(test_array))
     sorted_indexes = np.argsort(- dot_prod)
-    most_sim_indexes = sorted_indexes[1 : qtty + 1]
+    most_sim_indexes = sorted_indexes[1: qtty + 1]
     most_dim_distances = dot_prod[most_sim_indexes]
     return most_sim_indexes, most_dim_distances
 
 
-def found_most_similiar_indexes_hamming(test_array, qtty=10):
+def found_most_similiar_indexes_hamming(test_array, test_set, qtty=10):
     hamming_dist = np.sum(np.bitwise_xor(test_set, test_array), axis=1)
     sorted_indexes = np.argsort(hamming_dist)
-    most_sim_indexes = sorted_indexes[1 : qtty + 1]
+    most_sim_indexes = sorted_indexes[1: qtty + 1]
     most_dim_distances = hamming_dist[most_sim_indexes]
     return most_sim_indexes, most_dim_distances
 
 
-# Some params
-dist_metric_type = 'hamming_dist'
-fetch_qtty = 10
-weighted_dist = False
-
-distances_metrics = {
-    'dot_product': found_similiar_indexes_dot_product,
-    'hamming_dist': found_most_similiar_indexes_hamming
-}
-
-correct_total = 0
-fetched_total = 0
-start_time = time.time()
-mask_array = np.array(list(reversed(range(1, fetch_qtty + 1))))
-mask_aray_sum = sum(mask_array)
-if weighted_dist:
-    fetch_qtty_to_add = mask_aray_sum
-else:
-    fetch_qtty_to_add = fetch_qtty
-
-for idx in tqdm(range(test_labels.shape[0])):
-    test_label = test_labels[idx]
-    test_array = test_set[idx]
-    most_sim_indexes, most_dim_distances = distances_metrics[dist_metric_type](
-        test_array, qtty=fetch_qtty)
-    most_sim_labels = test_labels[most_sim_indexes]
-    equal_to_label = most_sim_labels == test_label
-    if weighted_dist:
-        equal_to_label = equal_to_label * mask_array
-    correct_qtty = np.sum(equal_to_label)
-    correct_total += correct_qtty
-    fetched_total += fetch_qtty_to_add
-
-print("Time consumption: %s" % timedelta(seconds=time.time() - start_time))
-print("Fetched_qtty: %d, weighted_dist: %s, distance metric type: %s."
-      "\nAccuracy %.4f." % (
-    fetch_qtty, weighted_dist, dist_metric_type,
-    correct_total / fetched_total))
+def test_similarity_metric(metric_name, test_labels, test_set, fetch_qtty,
+                           notes):
+    distances_metrics = {
+        'dot_product': found_similiar_indexes_dot_product,
+        'hamming_dist': found_most_similiar_indexes_hamming
+    }
+    dist_func = distances_metrics[metric_name]
+    correct_total = 0
+    fetched_total = 0
+    start_time = time.time()
+    desc = metric_name + '/' + notes
+    for idx in tqdm(range(test_labels.shape[0]), desc=desc):
+        test_label = test_labels[idx]
+        test_array = test_set[idx]
+        most_sim_indexes, most_dim_distances = dist_func(
+            test_array, test_set, qtty=fetch_qtty)
+        most_sim_labels = test_labels[most_sim_indexes]
+        equal_to_label = most_sim_labels == test_label
+        correct_qtty = np.sum(equal_to_label)
+        correct_total += correct_qtty
+        fetched_total += fetch_qtty
+    accuracy = correct_total / fetched_total
+    time_cons = time.time() - start_time
+    return accuracy, time_cons
 
 
-# def print_most_similiar_labels(idx, qtty=10):
-#     test_array = test_set[idx]
-#     print("Test on label: %d" % test_labels[idx])
-#     most_sim_indexes, most_dim_distances = found_most_similiar_indexes(
-#         test_array, qtty=qtty)
-#     codes = test_set[most_sim_indexes]
-#     # toimage(codes).show()
-#     # img = mpimg.imread('/home/legatsap/Pictures/99737.jpg')
-#     # plt.imshow(codes)
-#     # plt.show()
-#     print("Most similiar labels are:")
-#     for sim_label, sim_dist, sim_idx in zip(test_labels[most_sim_indexes], most_dim_distances, most_sim_indexes):
-#         print("\t%d\tdist: %d, \tidx: %d" % (sim_label, sim_dist, sim_idx))
+all_results = []
+for test_case in test_cases:
+    test_type = test_case['type']
 
+    if test_type == 'default_mnist':
+        mnist_data = mnist.input_data.read_data_sets(
+            "/tmp/MNIST_data/", one_hot=True)
+        encodings_test = mnist_data.test.images
+        labels_test_one_hot = mnist_data.test.labels
 
-# while True:
-#     idx = int(input("Enter index to test\n>>> "))
-#     print_most_similiar_labels(idx)
+    if test_type == 'rbm':
+        main_path = '/tmp/rbm_reconstr'
+        encodings_test, labels_test_one_hot = get_data(
+            main_path, test_case['run_no'])
+
+    if test_type == 'aec_rbm':
+        main_path = '/tmp/rbm_aec_reconstr'
+        encodings_test, labels_test_one_hot = get_data(
+            main_path, test_case['run_no'])
+
+    # binarize encodings with threshold, even initial images from MNIST
+    encodings_test_bin = np.copy(encodings_test)
+    encodings_test_bin = binarize_encodings(encodings_test_bin)
+    test_labels = np.argmax(labels_test_one_hot, axis=1)
+
+    # test hamming distance
+    notes = test_case['notes']
+    hamming_accuracy, hamming_time_cons = test_similarity_metric(
+        'hamming_dist', test_labels, encodings_test_bin, fetch_qtty, notes)
+    dot_product_accuracy, dot_product_time_cons = test_similarity_metric(
+        'dot_product', test_labels, encodings_test_bin, fetch_qtty, notes)
+
+    print(notes)
+    print(
+        "\tHamming: accuracy - {ha}, time consumption {hts} seconds\n"
+        "\tDot product: accuracy - {da}, time consumption {dts} seconds\n".format(
+            ha=hamming_accuracy, hts=hamming_time_cons,
+            da=dot_product_accuracy, dts=dot_product_accuracy)
+    )
+    res_dict = {
+        'notes': test_case['notes'],
+        'hamming_accuracy': hamming_accuracy,
+        'hamming_time_cons': hamming_time_cons,
+        'dot_product_accuracy': dot_product_accuracy,
+        'dot_product_time_cons': dot_product_time_cons
+    }
+    all_results.append(res_dict)
+
+# save results as csv file
+with open(args.csv_res_path, 'w') as f:
+    fieldnames = [
+        'notes', 'hamming_accuracy', 'hamming_time_cons',
+        'dot_product_accuracy', 'dot_product_time_cons']
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+    writer.writeheader()
+    for row in all_results:
+        writer.writerow(row)
+
+    print("Results were saved to %s" % args.csv_res_path)

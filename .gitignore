@@ -4,3 +4,4 @@ __pycache__
 *sublime-workspace
 MNIST_data/
 .TODO
+tmp_files/

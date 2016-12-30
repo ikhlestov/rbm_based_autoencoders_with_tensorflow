@@ -1,32 +1,47 @@
+"""Run sklearn SVM wth banch of models and check their accuracy.
+Example usage:
+python results_validation/svm_clusterization_test.py --test_cases rbm:0 aec_rbm:0 aec_rbm:1
+"""
 import os
 from time import time
-import pickle
 import warnings
+import argparse
+import csv
 
 import numpy as np
 from sklearn import metrics, svm, preprocessing
-from sklearn.cluster import KMeans, SpectralClustering
 from tensorflow.examples.tutorials import mnist
 
-MAX_ITER = 200
-TEST_SCALED = False
+from utils import get_notes_from_case, binarize_encodings
+
+MAX_ITER = 50
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    '--test_cases', type=str, required=True, nargs='+',
+    help="Indexes of runs that should be tested."
+         "Should be provided as net_type:idx"
+         "ex: --test_cases rbm:0 rbm:1 rbm_aec:0 rbm_aec:1")
+parser.add_argument(
+    '--csv_res_path', type=str,
+    default='/tmp/svm_clusterizationn_test_results.csv',
+    help="Where metrics from evaluation should be saved")
+args = parser.parse_args()
 
 test_cases = [
     {'type': 'default_mnist',
-     'notes': 'SVM based on default mnist dataset'},
-    {'type': 'rbm',
-     'notes': 'RMB based encodings, training with sigmoids',
-     'run_no': '0', },
-    {'type': 'rbm',
-     'notes': 'RBM based encodings, training with binary mode',
-     'run_no': '1', },
-    {'type': 'aec_rbm',
-     'notes': 'Autoencoder based on sigmoid RBM',
-     'run_no': '0', },
-    {'type': 'aec_rbm',
-     'notes': 'Autoencoder based on binary mode RBM',
-     'run_no': '1', },
+     'notes': 'default mnist dataset'},
 ]
+
+for case in args.test_cases:
+    case_type, run_no = case.split(':')
+    notes = get_notes_from_case(case_type, run_no)
+    test_cases.append(
+        {'type': case_type,
+         'run_no': run_no,
+         'notes': notes
+        }
+    )
 
 
 def get_data(main_path, run_no):
@@ -55,22 +70,22 @@ def test_svm_estimator(estimator, notes, encodings_train, labels_train,
     prec_recall_f_score = metrics.precision_recall_fscore_support(
         labels_test, predicted)
     print('-' * 10)
-    return accuracy, prec_recall_f_score
+    prec_recall_f_score_dict = {
+        'prec': np.mean(prec_recall_f_score[0]),
+        'recall': np.mean(prec_recall_f_score[1]),
+        'f_score': np.mean(prec_recall_f_score[2])
+    }
+    return accuracy, prec_recall_f_score_dict
 
 
 def append_results(all_results, accuracy, prec_recall_f_score, notes):
-    all_results.append({
+    res = {
         'accuracy': accuracy,
-        'prec_recall_f_score': prec_recall_f_score,
         'notes': notes
-    })
+    }
+    res.update(prec_recall_f_score)
+    all_results.append(res)
     return all_results
-
-
-def binarize_encodings(encodings, threshold=0.2):
-    encodings[encodings > threshold] = 1
-    encodings[encodings <= threshold] = 0
-    return encodings
 
 
 def run_estimator(all_results, notes, encodings_train, labels_train,
@@ -99,15 +114,15 @@ for test_case in test_cases:
     if test_type == 'default_mnist':
         mnist_data = mnist.input_data.read_data_sets(
                     "/tmp/MNIST_data/", one_hot=True)
-        encodings_train = mnist_data.train.images
+        encodings_train_bin = mnist_data.train.images
         labels_train_one_hot = mnist_data.train.labels
-        encodings_test = mnist_data.test.images
+        encodings_test_bin = mnist_data.test.images
         labels_test_one_hot = mnist_data.test.labels
 
     if test_type == 'rbm':
         main_path = '/tmp/rbm_reconstr'
-        (encodings_train, labels_train_one_hot,
-         encodings_test, labels_test_one_hot) = get_data(
+        (encodings_train_bin, labels_train_one_hot,
+         encodings_test_bin, labels_test_one_hot) = get_data(
             main_path, test_case['run_no'])
 
     if test_type == 'aec_rbm':
@@ -129,53 +144,21 @@ for test_case in test_cases:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
 
-        # test without data scaling
         all_results = run_estimator(
             all_results,
             notes=test_case['notes'],
-            encodings_train=encodings_train,
+            encodings_train=encodings_train_bin,
             labels_train=labels_train,
-            encodings_test=encodings_test,
+            encodings_test=encodings_test_bin,
             labels_test=labels_test)
 
-        if TEST_SCALED:
-            encodings_train = preprocessing.scale(encodings_train)
-            encodings_test = preprocessing.scale(encodings_test)
+# save results as csv file
+with open(args.csv_res_path, 'w') as f:
+    fieldnames = ['notes', 'accuracy', 'prec', 'f_score', 'recall']
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
 
-            # test with data scaling
-            new_notes = test_case['notes'] + ', scaled_data'
-            all_results = run_estimator(
-                all_results,
-                notes=new_notes,
-                encodings_train=encodings_train,
-                labels_train=labels_train,
-                encodings_test=encodings_test,
-                labels_test=labels_test)
+    writer.writeheader()
+    for row in all_results:
+        writer.writerow(row)
 
-        # test also with binary mode for AutoEncoder based on rbm
-        if test_type == 'aec_rbm':
-            new_notes = test_case['notes'] + ', binarized encodings'
-            all_results = run_estimator(
-                all_results,
-                notes=new_notes,
-                encodings_train=encodings_train_bin,
-                labels_train=labels_train,
-                encodings_test=encodings_test_bin,
-                labels_test=labels_test)
-
-            # and also with scaled data
-            if TEST_SCALED:
-                encodings_train_bin = preprocessing.scale(encodings_train_bin)
-                encodings_test_bin = preprocessing.scale(encodings_test_bin)
-
-                new_notes += ', scaled_data'
-                all_results = run_estimator(
-                    all_results,
-                    notes=new_notes,
-                    encodings_train=encodings_train_bin,
-                    labels_train=labels_train,
-                    encodings_test=encodings_test_bin,
-                    labels_test=labels_test)
-
-with open('clusterization_results_%d_iters.pkl' % MAX_ITER, 'wb') as f:
-    pickle.dump(all_results, f)
+    print("Results were saved to %s" % args.csv_res_path)
